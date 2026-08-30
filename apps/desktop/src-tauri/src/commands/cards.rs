@@ -25,9 +25,11 @@ pub async fn search_cards(
         search: None,
         tech_stack,
     };
-    tokio::task::spawn_blocking(move || db.search_cards(&query, &filters).map_err(|e| e.to_string()))
-        .await
-        .map_err(|e| format!("search_cards join 失败: {}", e))?
+    tokio::task::spawn_blocking(move || {
+        db.search_cards(&query, &filters).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("search_cards join 失败: {}", e))?
 }
 
 /// 分页查询知识卡片列表。

@@ -4,6 +4,8 @@
 //! 数据源文件 → Source Parser → NormalizedSession → Dedup → SQLite
 //! ```
 
+use std::path::Path;
+
 /// 统一的会话格式，各数据源解析器产出此结构后交给调度器去重写入。
 #[derive(Debug, Clone)]
 pub struct NormalizedSession {
@@ -21,6 +23,9 @@ pub struct NormalizedSession {
     pub messages: Vec<NormalizedMessage>,
     /// 原始数据文件路径（如 JSONL 文件位置）
     pub raw_path: String,
+    /// 原文件指纹；下次扫描先比较这两个值，命中时不再解析。
+    pub raw_mtime_ms: Option<i64>,
+    pub raw_size_bytes: Option<i64>,
     /// 会话创建时间 (RFC 3339)
     pub created_at: String,
     /// 会话最后更新时间 (RFC 3339)
@@ -40,4 +45,17 @@ pub struct NormalizedMessage {
     pub tokens_in: u32,
     /// 该消息消耗的输出 token 数
     pub tokens_out: u32,
+}
+
+pub fn file_fingerprint(path: &Path) -> Option<(i64, i64)> {
+    let metadata = path.metadata().ok()?;
+    let modified = metadata
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?;
+    Some((
+        modified.as_millis().min(i64::MAX as u128) as i64,
+        metadata.len().min(i64::MAX as u64) as i64,
+    ))
 }

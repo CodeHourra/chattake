@@ -37,7 +37,7 @@ impl Database {
         params_vec.push(q.to_string());
         params_vec.extend(filter_params);
 
-        let conn = self.conn();
+        let conn = self.read_conn()?;
         let mut stmt = conn.prepare(&sql)?;
         let results: Vec<CardSummary> = stmt
             .query_map(rusqlite::params_from_iter(params_vec.iter()), |r| {

@@ -1,8 +1,8 @@
-mod commands;
 mod collector;
+mod commands;
+pub mod config;
 /// Cursor workspace 路径百分号解码（采集与 DB 迁移共用）
 mod path_local;
-pub mod config;
 mod sidecar;
 mod storage;
 
@@ -61,9 +61,8 @@ pub fn run() {
 
     let context = tauri::generate_context!();
 
-    let sidecar = SidecarManager::find_binary(context.package_info()).map(|path| {
-        Arc::new(SidecarManager::new(path))
-    });
+    let sidecar = SidecarManager::find_binary(context.package_info())
+        .map(|path| Arc::new(SidecarManager::new(path)));
 
     if sidecar.is_none() {
         log::warn!("Sidecar 未就绪：提炼功能将不可用，直至构建或安装 xunji-sidecar");
@@ -100,6 +99,7 @@ pub fn run() {
             commands::sidebar::list_tech_stack_counts,
             commands::sidebar::list_card_types,
             commands::config::get_config,
+            commands::config::get_database_backup_path,
             commands::config::save_config,
             commands::config::list_provider_models,
             commands::config::test_provider,

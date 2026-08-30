@@ -109,9 +109,7 @@ export interface Card {
   value: string | null
   summary: string | null
   note: string
-  categoryId: string | null
-  memory: string | null
-  skill: string | null
+  publicationStatus: 'draft' | 'published'
   sourceName: string | null
   projectName: string | null
   promptTokens: number
@@ -136,7 +134,7 @@ export interface CardSummary {
   type: string | null
   value: string | null
   summary: string | null
-  categoryId: string | null
+  publicationStatus: 'draft' | 'published'
   sourceName: string | null
   projectName: string | null
   createdAt: string

@@ -22,7 +22,7 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use walkdir::WalkDir;
 
-use super::normalizer::{NormalizedMessage, NormalizedSession};
+use super::normalizer::{file_fingerprint, NormalizedMessage, NormalizedSession};
 
 const SOURCE_ID: &str = "codebuddy";
 
@@ -38,7 +38,10 @@ impl CodeBuddyCollector {
     }
 
     /// 扫描所有配置根目录下的会话目录，产出标准化会话列表
-    pub fn collect(&self) -> Vec<NormalizedSession> {
+    pub fn collect_changed<F>(&self, unchanged: F) -> Vec<NormalizedSession>
+    where
+        F: Fn(&Path, i64, i64) -> bool,
+    {
         log::info!(
             "CodeBuddy 采集开始，解析后的扫描根目录共 {} 个: {:?}",
             self.scan_dirs.len(),
@@ -71,6 +74,14 @@ impl CodeBuddyCollector {
                 leaf_candidates += 1;
                 let key = path.to_string_lossy().to_string();
                 if !seen.insert(key) {
+                    continue;
+                }
+                let index_path = path.join("index.json");
+                let (mtime, size) = match codebuddy_fingerprint(path) {
+                    Some(fingerprint) => fingerprint,
+                    None => continue,
+                };
+                if unchanged(&index_path, mtime, size) {
                     continue;
                 }
 
@@ -285,7 +296,9 @@ fn extract_workspace_folder_from_text_blob(s: &str) -> Option<String> {
         .or_else(|| extract_line_after_workspace_key(s, "Workspace Path:"))
 }
 
-fn parse_codebuddy_session_dir(session_dir: &Path) -> Result<Option<NormalizedSession>, Box<dyn std::error::Error + Send + Sync>> {
+fn parse_codebuddy_session_dir(
+    session_dir: &Path,
+) -> Result<Option<NormalizedSession>, Box<dyn std::error::Error + Send + Sync>> {
     let index_path = session_dir.join("index.json");
     let text = fs::read_to_string(&index_path)?;
     let index: Value = serde_json::from_str(&text)?;
@@ -310,8 +323,8 @@ fn parse_codebuddy_session_dir(session_dir: &Path) -> Result<Option<NormalizedSe
     let (created_at, updated_at) = session_times_rfc3339(&index, &index_path)?;
 
     // 与 IDE 一致：工作区目录下 index.json 里对当前会话（目录名 = conversation id）的 name → 列表/详情主标题
-    let analysis_title = workspace_parent
-        .and_then(|wd| try_conversation_title_from_workspace_index(wd, &leaf));
+    let analysis_title =
+        workspace_parent.and_then(|wd| try_conversation_title_from_workspace_index(wd, &leaf));
 
     // Workspace Folder 绝对路径 → 侧栏「项目」分组名；末级为日期戳/hex 时尝试用父目录名
     let (project_path, project_name) =
@@ -320,7 +333,9 @@ fn parse_codebuddy_session_dir(session_dir: &Path) -> Result<Option<NormalizedSe
                 let friendly = friendly_project_folder_name(&path);
                 log::debug!(
                     "CodeBuddy 会话 {} 工作区路径 {} → 侧栏项目分组名 {:?}",
-                    session_id, path, friendly
+                    session_id,
+                    path,
+                    friendly
                 );
                 (Some(path), Some(friendly))
             }
@@ -369,6 +384,7 @@ fn parse_codebuddy_session_dir(session_dir: &Path) -> Result<Option<NormalizedSe
     }
 
     let raw_path = index_path.to_string_lossy().to_string();
+    let (raw_mtime_ms, raw_size_bytes) = codebuddy_fingerprint(session_dir).unwrap_or((0, 0));
 
     Ok(Some(NormalizedSession {
         source_id: SOURCE_ID.to_string(),
@@ -378,19 +394,42 @@ fn parse_codebuddy_session_dir(session_dir: &Path) -> Result<Option<NormalizedSe
         analysis_title,
         messages,
         raw_path,
+        raw_mtime_ms: Some(raw_mtime_ms),
+        raw_size_bytes: Some(raw_size_bytes),
         created_at,
         updated_at,
     }))
 }
 
+fn codebuddy_fingerprint(session_dir: &Path) -> Option<(i64, i64)> {
+    let mut fingerprint = file_fingerprint(&session_dir.join("index.json"))?;
+    let messages_dir = session_dir.join("messages");
+    if let Ok(entries) = fs::read_dir(messages_dir) {
+        for entry in entries.flatten() {
+            if let Some((mtime, size)) = file_fingerprint(&entry.path()) {
+                fingerprint.0 = fingerprint.0.max(mtime);
+                fingerprint.1 = fingerprint.1.saturating_add(size);
+            }
+        }
+    }
+    Some(fingerprint)
+}
+
 /// 从 index.json 的 requests[].startedAt（毫秒）推导时间；失败则用 index 文件 mtime
-fn session_times_rfc3339(index: &Value, index_path: &Path) -> Result<(String, String), Box<dyn std::error::Error + Send + Sync>> {
+fn session_times_rfc3339(
+    index: &Value,
+    index_path: &Path,
+) -> Result<(String, String), Box<dyn std::error::Error + Send + Sync>> {
     let meta = fs::metadata(index_path)?;
     let fallback = file_mtime_rfc3339(&meta)?;
 
     let reqs = index["requests"].as_array();
-    let first_ms = reqs.and_then(|r| r.first()).and_then(|x| x["startedAt"].as_u64());
-    let last_ms = reqs.and_then(|r| r.last()).and_then(|x| x["startedAt"].as_u64());
+    let first_ms = reqs
+        .and_then(|r| r.first())
+        .and_then(|x| x["startedAt"].as_u64());
+    let last_ms = reqs
+        .and_then(|r| r.last())
+        .and_then(|x| x["startedAt"].as_u64());
 
     let created = first_ms
         .and_then(ms_to_rfc3339)
@@ -408,7 +447,9 @@ fn ms_to_rfc3339(ms: u64) -> Option<String> {
     DateTime::from_timestamp(secs, nanos).map(|dt| dt.to_rfc3339())
 }
 
-fn file_mtime_rfc3339(meta: &std::fs::Metadata) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+fn file_mtime_rfc3339(
+    meta: &std::fs::Metadata,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     let t = meta.modified().or_else(|_| meta.created())?;
     let secs = t.duration_since(std::time::UNIX_EPOCH)?.as_secs() as i64;
     let dt = DateTime::<Utc>::from_timestamp(secs, 0).unwrap_or_else(Utc::now);
@@ -545,7 +586,10 @@ mod tests {
     #[test]
     fn extract_user_query_from_xml() {
         let s = "foo<user_query>你好</user_query>bar";
-        assert_eq!(extract_xml_section(s, "user_query").as_deref(), Some("你好"));
+        assert_eq!(
+            extract_xml_section(s, "user_query").as_deref(),
+            Some("你好")
+        );
     }
 
     #[test]

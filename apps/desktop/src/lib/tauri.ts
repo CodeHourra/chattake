@@ -117,6 +117,9 @@ export const api = {
   /** 读取当前应用配置 */
   getConfig: () => invoke<AppConfigDto>('get_config'),
 
+  /** 本次启动若重建过旧库，返回可恢复备份路径。 */
+  getDatabaseBackupPath: () => invoke<string | null>('get_database_backup_path'),
+
   /** 保存应用配置（写磁盘 + 热更新内存） */
   saveConfig: (config: AppConfigDto) => invoke<void>('save_config', { config }),
 

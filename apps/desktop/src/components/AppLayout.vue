@@ -1,7 +1,17 @@
 <script setup lang="ts">
+import { onMounted } from 'vue'
+import { useMessage } from 'naive-ui'
 import TopBar from './TopBar.vue'
 import Sidebar from './Sidebar.vue'
 import AnalysisQueuePanel from './AnalysisQueuePanel.vue'
+import { api } from '../lib/tauri'
+
+const message = useMessage()
+
+onMounted(async () => {
+  const path = await api.getDatabaseBackupPath().catch(() => null)
+  if (path) message.warning(`v0.2 数据库已重建，旧库备份位于：${path}`, { duration: 0, closable: true })
+})
 </script>
 
 <template>

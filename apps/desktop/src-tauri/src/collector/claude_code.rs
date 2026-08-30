@@ -21,7 +21,7 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
-use super::normalizer::{NormalizedMessage, NormalizedSession};
+use super::normalizer::{file_fingerprint, NormalizedMessage, NormalizedSession};
 
 /// Claude Code 数据采集器
 pub struct ClaudeCodeCollector {
@@ -35,17 +35,28 @@ impl ClaudeCodeCollector {
     }
 
     /// 扫描所有配置的目录，返回解析后的标准化会话列表
+    #[cfg(test)]
     pub fn collect(&self) -> Vec<NormalizedSession> {
+        self.collect_changed(|_, _, _| false)
+    }
+
+    pub fn collect_changed<F>(&self, unchanged: F) -> Vec<NormalizedSession>
+    where
+        F: Fn(&Path, i64, i64) -> bool,
+    {
         let mut sessions = Vec::new();
 
         for dir in &self.scan_dirs {
             let projects_dir = dir.join("projects");
             if !projects_dir.exists() {
-                log::debug!("Claude Code projects 目录不存在，跳过: {}", projects_dir.display());
+                log::debug!(
+                    "Claude Code projects 目录不存在，跳过: {}",
+                    projects_dir.display()
+                );
                 continue;
             }
 
-            match self.scan_projects_dir(&projects_dir) {
+            match self.scan_projects_dir(&projects_dir, &unchanged) {
                 Ok(mut found) => {
                     log::info!(
                         "从 {} 扫描到 {} 个会话",
@@ -55,7 +66,11 @@ impl ClaudeCodeCollector {
                     sessions.append(&mut found);
                 }
                 Err(e) => {
-                    log::error!("扫描 Claude Code 目录失败: {} - {}", projects_dir.display(), e);
+                    log::error!(
+                        "扫描 Claude Code 目录失败: {} - {}",
+                        projects_dir.display(),
+                        e
+                    );
                 }
             }
         }
@@ -65,7 +80,14 @@ impl ClaudeCodeCollector {
     }
 
     /// 扫描 projects/ 下所有子目录中的 .jsonl 文件
-    fn scan_projects_dir(&self, projects_dir: &Path) -> Result<Vec<NormalizedSession>, std::io::Error> {
+    fn scan_projects_dir<F>(
+        &self,
+        projects_dir: &Path,
+        unchanged: &F,
+    ) -> Result<Vec<NormalizedSession>, std::io::Error>
+    where
+        F: Fn(&Path, i64, i64) -> bool,
+    {
         let mut sessions = Vec::new();
 
         for entry in fs::read_dir(projects_dir)? {
@@ -88,6 +110,13 @@ impl ClaudeCodeCollector {
                 if file_path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
                     continue;
                 }
+                let (raw_mtime_ms, raw_size_bytes) = match file_fingerprint(&file_path) {
+                    Some(fingerprint) => fingerprint,
+                    None => continue,
+                };
+                if unchanged(&file_path, raw_mtime_ms, raw_size_bytes) {
+                    continue;
+                }
 
                 // 文件名（去掉 .jsonl）即为 session_id
                 let session_id = file_path
@@ -108,10 +137,8 @@ impl ClaudeCodeCollector {
                         }
 
                         // 优先使用 JSONL 内的 cwd 作为项目路径
-                        let final_project_path = parse_result
-                            .cwd
-                            .clone()
-                            .or_else(|| project_path.clone());
+                        let final_project_path =
+                            parse_result.cwd.clone().or_else(|| project_path.clone());
                         let final_project_name = final_project_path
                             .as_ref()
                             .and_then(|p| Path::new(p).file_name())
@@ -136,6 +163,8 @@ impl ClaudeCodeCollector {
                             analysis_title: None,
                             messages: parse_result.messages,
                             raw_path: file_path.to_string_lossy().to_string(),
+                            raw_mtime_ms: Some(raw_mtime_ms),
+                            raw_size_bytes: Some(raw_size_bytes),
                             created_at,
                             updated_at,
                         });
@@ -214,10 +243,7 @@ fn parse_jsonl(path: &Path) -> Result<ParseResult, Box<dyn std::error::Error>> {
         let role = if extracted.is_tool_result {
             "tool".to_string()
         } else {
-            message["role"]
-                .as_str()
-                .unwrap_or(msg_type)
-                .to_string()
+            message["role"].as_str().unwrap_or(msg_type).to_string()
         };
 
         let timestamp = entry["timestamp"].as_str().map(String::from);
@@ -418,7 +444,10 @@ mod tests {
         });
         let result = extract_content(&msg);
         assert!(result.text.contains("[Tool Result:"));
-        assert!(result.is_tool_result, "纯 tool_result 内容应标记为 is_tool_result");
+        assert!(
+            result.is_tool_result,
+            "纯 tool_result 内容应标记为 is_tool_result"
+        );
     }
 
     #[test]
@@ -432,7 +461,10 @@ mod tests {
     #[test]
     fn test_derive_project_info() {
         let (path, name) = derive_project_info("-Users-steve-Codes-myspace-ai-project-xunji");
-        assert_eq!(path, Some("/Users/steve/Codes/myspace/ai/project/xunji".to_string()));
+        assert_eq!(
+            path,
+            Some("/Users/steve/Codes/myspace/ai/project/xunji".to_string())
+        );
         assert_eq!(name, Some("xunji".to_string()));
     }
 
@@ -465,8 +497,14 @@ mod tests {
         assert_eq!(result.messages[1].tokens_in, 100);
         assert_eq!(result.messages[1].tokens_out, 50);
         assert_eq!(result.cwd, Some("/Users/steve/project".to_string()));
-        assert_eq!(result.first_timestamp, Some("2026-03-20T05:30:00.000Z".to_string()));
-        assert_eq!(result.last_timestamp, Some("2026-03-20T05:30:05.000Z".to_string()));
+        assert_eq!(
+            result.first_timestamp,
+            Some("2026-03-20T05:30:00.000Z".to_string())
+        );
+        assert_eq!(
+            result.last_timestamp,
+            Some("2026-03-20T05:30:05.000Z".to_string())
+        );
     }
 
     #[test]

@@ -167,6 +167,16 @@ pub async fn get_config(state: State<'_, AppState>) -> Result<AppConfigDto, Stri
 }
 
 #[tauri::command]
+pub async fn get_database_backup_path(
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    Ok(state
+        .db
+        .last_backup_path()
+        .map(|path| path.display().to_string()))
+}
+
+#[tauri::command]
 pub async fn save_config(state: State<'_, AppState>, config: AppConfigDto) -> Result<(), String> {
     let new_config = AppConfig::from(config);
     new_config.validate().map_err(|e| e.to_string())?;

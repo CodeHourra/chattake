@@ -4,8 +4,8 @@
 //! 以便 `#[tauri::command]` 生成的 `__cmd__*` 符号解析正确。
 
 pub mod cards;
-pub mod export;
 pub mod config;
+pub mod export;
 pub mod sessions;
 pub mod sidebar;
 pub mod sync;

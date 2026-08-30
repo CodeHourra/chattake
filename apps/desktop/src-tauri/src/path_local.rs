@@ -11,8 +11,6 @@
 //!               "/Users/x/向善数据"
 //! ```
 
-use std::path::Path;
-
 use url::Url;
 
 /// 将 Cursor `workspace.json` 的 `folder` 字段或库内已存的本地路径字符串解码为绝对路径。
@@ -56,28 +54,6 @@ pub fn decode_cursor_folder_to_local_path(folder: &str) -> String {
     raw.to_string()
 }
 
-/// 对可能含 `%` 的本地路径做解码；若从路径可得到末级目录名，则一并返回用于 `project_name`。
-///
-/// 用于迁移：同时修正 `project_path` 与由路径推导的 `project_name`。
-pub fn decode_session_paths(
-    project_path: Option<String>,
-    project_name: Option<String>,
-) -> (Option<String>, Option<String>) {
-    let new_path = project_path.map(|s| decode_cursor_folder_to_local_path(&s));
-
-    let new_name = if let Some(ref p) = new_path {
-        Path::new(p)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .map(String::from)
-            .or_else(|| project_name.map(|s| decode_cursor_folder_to_local_path(&s)))
-    } else {
-        project_name.map(|s| decode_cursor_folder_to_local_path(&s))
-    };
-
-    (new_path, new_name)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -85,18 +61,27 @@ mod tests {
     #[test]
     fn decodes_file_url_with_percent_encoded_segment() {
         let s = "file:///Users/steve/%E5%90%91%E5%96%84%E6%95%B0%E6%8D%AE";
-        assert_eq!(decode_cursor_folder_to_local_path(s), "/Users/steve/向善数据");
+        assert_eq!(
+            decode_cursor_folder_to_local_path(s),
+            "/Users/steve/向善数据"
+        );
     }
 
     #[test]
     fn decodes_plain_path_with_percent_encoded_segment() {
         let s = "/Users/steve/%E5%90%91%E5%96%84%E6%95%B0%E6%8D%AE";
-        assert_eq!(decode_cursor_folder_to_local_path(s), "/Users/steve/向善数据");
+        assert_eq!(
+            decode_cursor_folder_to_local_path(s),
+            "/Users/steve/向善数据"
+        );
     }
 
     #[test]
     fn passthrough_ascii_path_without_percent() {
         let s = "/Users/steve/myproject";
-        assert_eq!(decode_cursor_folder_to_local_path(s), "/Users/steve/myproject");
+        assert_eq!(
+            decode_cursor_folder_to_local_path(s),
+            "/Users/steve/myproject"
+        );
     }
 }

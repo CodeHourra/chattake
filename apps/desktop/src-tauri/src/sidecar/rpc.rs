@@ -65,19 +65,24 @@ impl RpcClient {
             "id": id,
         });
 
-        let request_str = serde_json::to_string(&request)
-            .map_err(|e| RpcError::Serialize(e.to_string()))?;
+        let request_str =
+            serde_json::to_string(&request).map_err(|e| RpcError::Serialize(e.to_string()))?;
 
-        log::debug!("RPC 请求: method={}, id={}, timeout={}s", method, id, timeout.as_secs());
+        log::debug!(
+            "RPC 请求: method={}, id={}, timeout={}s",
+            method,
+            id,
+            timeout.as_secs()
+        );
 
         // 写 stdin
         {
-            let mut stdin = self.stdin.lock()
+            let mut stdin = self
+                .stdin
+                .lock()
                 .map_err(|_| RpcError::Internal("stdin lock poisoned".into()))?;
-            writeln!(stdin, "{}", request_str)
-                .map_err(|e| RpcError::Io(e.to_string()))?;
-            stdin.flush()
-                .map_err(|e| RpcError::Io(e.to_string()))?;
+            writeln!(stdin, "{}", request_str).map_err(|e| RpcError::Io(e.to_string()))?;
+            stdin.flush().map_err(|e| RpcError::Io(e.to_string()))?;
         }
 
         // 读 stdout，通过独立线程 + channel 实现超时控制
@@ -88,12 +93,13 @@ impl RpcClient {
         }
 
         // 解析响应
-        let response: Value = serde_json::from_str(response_str.trim())
-            .map_err(|e| RpcError::Deserialize(format!(
+        let response: Value = serde_json::from_str(response_str.trim()).map_err(|e| {
+            RpcError::Deserialize(format!(
                 "响应解析失败: {} - {}",
                 e,
                 &response_str[..response_str.len().min(200)]
-            )))?;
+            ))
+        })?;
 
         // 检查 error 字段
         if let Some(err) = response.get("error") {
@@ -106,7 +112,8 @@ impl RpcClient {
         }
 
         // 提取 result 字段并反序列化为目标类型
-        let result = response.get("result")
+        let result = response
+            .get("result")
             .ok_or_else(|| RpcError::Deserialize("响应缺少 result 字段".into()))?;
 
         serde_json::from_value(result.clone())
@@ -118,7 +125,9 @@ impl RpcClient {
     /// 实现方式：scoped thread 内阻塞读取 + channel recv_timeout。
     /// `std::thread::scope` 保证子线程在作用域内结束，无需 unsafe。
     fn read_response_with_timeout(&self, timeout: Duration) -> Result<String, RpcError> {
-        let mut stdout = self.stdout.lock()
+        let mut stdout = self
+            .stdout
+            .lock()
             .map_err(|_| RpcError::Internal("stdout lock poisoned".into()))?;
 
         let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
@@ -129,8 +138,12 @@ impl RpcClient {
             s.spawn(move || {
                 let mut line = String::new();
                 match reader.read_line(&mut line) {
-                    Ok(_) => { let _ = tx.send(Ok(line)); }
-                    Err(e) => { let _ = tx.send(Err(e.to_string())); }
+                    Ok(_) => {
+                        let _ = tx.send(Ok(line));
+                    }
+                    Err(e) => {
+                        let _ = tx.send(Err(e.to_string()));
+                    }
                 }
             });
 

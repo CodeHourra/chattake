@@ -19,10 +19,10 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 
 use rpc::{RpcClient, RpcError};
-use tauri::utils::platform::resource_dir;
-use tauri::utils::{Env, PackageInfo};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use tauri::utils::platform::resource_dir;
+use tauri::utils::{Env, PackageInfo};
 
 /// Sidecar 进程管理器
 pub struct SidecarManager {
@@ -103,7 +103,9 @@ impl SidecarManager {
 
     /// 启动 sidecar 进程
     pub fn start(&self) -> Result<(), RpcError> {
-        let mut proc_guard = self.process.lock()
+        let mut proc_guard = self
+            .process
+            .lock()
             .map_err(|_| RpcError::Internal("process lock poisoned".into()))?;
 
         if proc_guard.is_some() {
@@ -119,16 +121,22 @@ impl SidecarManager {
             .spawn()
             .map_err(|e| RpcError::Io(format!("启动 sidecar 失败: {}", e)))?;
 
-        let stdin = child.stdin.take()
+        let stdin = child
+            .stdin
+            .take()
             .ok_or_else(|| RpcError::Internal("无法获取 sidecar stdin".into()))?;
-        let stdout = child.stdout.take()
+        let stdout = child
+            .stdout
+            .take()
             .ok_or_else(|| RpcError::Internal("无法获取 sidecar stdout".into()))?;
 
         let rpc_client = RpcClient::new(stdin, stdout);
 
         // 先存进程再存 client
         *proc_guard = Some(child);
-        let mut client_guard = self.client.lock()
+        let mut client_guard = self
+            .client
+            .lock()
             .map_err(|_| RpcError::Internal("client lock poisoned".into()))?;
         *client_guard = Some(rpc_client);
 
@@ -138,7 +146,9 @@ impl SidecarManager {
 
     /// 停止 sidecar 进程
     pub fn stop(&self) -> Result<(), RpcError> {
-        let mut proc_guard = self.process.lock()
+        let mut proc_guard = self
+            .process
+            .lock()
             .map_err(|_| RpcError::Internal("process lock poisoned".into()))?;
 
         if let Some(mut child) = proc_guard.take() {
@@ -147,7 +157,9 @@ impl SidecarManager {
             let _ = child.wait();
         }
 
-        let mut client_guard = self.client.lock()
+        let mut client_guard = self
+            .client
+            .lock()
             .map_err(|_| RpcError::Internal("client lock poisoned".into()))?;
         *client_guard = None;
 
@@ -195,10 +207,13 @@ impl SidecarManager {
             self.start()?;
         }
 
-        let client_guard = self.client.lock()
+        let client_guard = self
+            .client
+            .lock()
             .map_err(|_| RpcError::Internal("client lock poisoned".into()))?;
 
-        let client = client_guard.as_ref()
+        let client = client_guard
+            .as_ref()
             .ok_or_else(|| RpcError::Internal("RPC 客户端未就绪".into()))?;
 
         client.call(method, params)
@@ -215,10 +230,13 @@ impl SidecarManager {
             self.start()?;
         }
 
-        let client_guard = self.client.lock()
+        let client_guard = self
+            .client
+            .lock()
             .map_err(|_| RpcError::Internal("client lock poisoned".into()))?;
 
-        let client = client_guard.as_ref()
+        let client = client_guard
+            .as_ref()
             .ok_or_else(|| RpcError::Internal("RPC 客户端未就绪".into()))?;
 
         client.call_with_timeout(method, params, timeout)

@@ -17,7 +17,9 @@ use uuid::Uuid;
 
 use crate::config::AppConfig;
 use crate::sidecar::SidecarManager;
-use crate::storage::models::{Card, Message, NewCard, PaginatedResult, Session, SessionFilters, SessionSummary};
+use crate::storage::models::{
+    Card, Message, NewCard, PaginatedResult, Session, SessionFilters, SessionSummary,
+};
 use crate::storage::Database;
 use crate::AppState;
 
@@ -27,11 +29,7 @@ fn validate_session_filter_groups(groups: &[SessionFilters]) -> Result<(), Strin
         return Err("请至少指定一组筛选条件".to_string());
     }
     for (i, g) in groups.iter().enumerate() {
-        if g.source.is_none()
-            && g.host.is_none()
-            && g.project.is_none()
-            && g.status.is_none()
-        {
+        if g.source.is_none() && g.host.is_none() && g.project.is_none() && g.status.is_none() {
             return Err(format!("第 {} 组筛选条件为空", i + 1));
         }
     }
@@ -150,7 +148,8 @@ pub async fn get_session_messages(
 ) -> Result<Vec<Message>, String> {
     let db = state.db.clone();
     tokio::task::spawn_blocking(move || {
-        db.get_session_messages(&session_id).map_err(|e| e.to_string())
+        db.get_session_messages(&session_id)
+            .map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| format!("get_session_messages join 失败: {}", e))?
@@ -187,10 +186,10 @@ pub async fn distill_session(
     state: State<'_, AppState>,
     session_id: String,
 ) -> Result<DistillSessionResult, String> {
-    let sidecar = state
-        .sidecar
-        .clone()
-        .ok_or_else(|| "未找到 xunji-sidecar 可执行文件，请先构建 packages/sidecar 或安装到 ~/.xunji/bin/".to_string())?;
+    let sidecar = state.sidecar.clone().ok_or_else(|| {
+        "未找到 xunji-sidecar 可执行文件，请先构建 packages/sidecar 或安装到 ~/.xunji/bin/"
+            .to_string()
+    })?;
 
     let db = state.db.clone();
     // 取当前配置快照（RwLock → Clone），传入 spawn_blocking
@@ -202,7 +201,6 @@ pub async fn distill_session(
     .await
     .map_err(|e| format!("distill_session join 失败: {}", e))?
 }
-
 
 /// 在阻塞线程内跑完 DB + Sidecar 全流程（避免阻塞 tokio worker）。
 ///
@@ -234,7 +232,10 @@ fn run_distill_pipeline(
         session_db_id
     );
 
-    let included_count = messages.iter().filter(|m| is_included_distill_message(m)).count();
+    let included_count = messages
+        .iter()
+        .filter(|m| is_included_distill_message(m))
+        .count();
     log::info!(
         "trace_id={} distill transcript: 数据库消息 {} 条，纳入 user/assistant/model {} 条",
         trace_id,
@@ -287,8 +288,7 @@ fn run_distill_pipeline(
 
         // ── low / none：更新价值 + 持久化标题/类型/原因 → 正常返回（非错误） ──
         if v_norm == "low" || v_norm == "none" {
-            if let Err(e) =
-                db.update_session_status(session_db_id, "analyzed", Some(&judge.value))
+            if let Err(e) = db.update_session_status(session_db_id, "analyzed", Some(&judge.value))
             {
                 log::error!("低/无价值会话状态回写失败: {}", e);
             }

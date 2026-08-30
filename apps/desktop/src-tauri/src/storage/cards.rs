@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension, Row};
 use uuid::Uuid;
@@ -11,8 +9,7 @@ use super::models::*;
 //
 // cards.rs 和 search.rs 共用这些函数，避免列顺序不一致导致的映射错误。
 
-pub(super) const CARD_SUMMARY_COLUMNS: &str =
-    r#"c.id, c.session_id, c.title, c."type", c.value, c.summary, c.category_id, c.source_name, c.project_name, c.created_at, c.updated_at"#;
+pub(super) const CARD_SUMMARY_COLUMNS: &str = r#"c.id, c.session_id, c.title, c."type", c.value, c.summary, c.publication_status, c.source_name, c.project_name, c.created_at, c.updated_at"#;
 
 /// 从查询行映射 CardSummary（列顺序需与 CARD_SUMMARY_COLUMNS 一致）
 pub(super) fn card_summary_from_row(row: &Row<'_>) -> rusqlite::Result<CardSummary> {
@@ -23,7 +20,7 @@ pub(super) fn card_summary_from_row(row: &Row<'_>) -> rusqlite::Result<CardSumma
         card_type: row.get(3)?,
         value: row.get(4)?,
         summary: row.get(5)?,
-        category_id: row.get(6)?,
+        publication_status: row.get(6)?,
         source_name: row.get(7)?,
         project_name: row.get(8)?,
         created_at: row.get(9)?,
@@ -32,15 +29,6 @@ pub(super) fn card_summary_from_row(row: &Row<'_>) -> rusqlite::Result<CardSumma
 }
 
 fn card_from_row(row: &Row<'_>) -> rusqlite::Result<Card> {
-    // tech_stack 以逗号分隔字符串存储，读出后拆分还原为 Vec
-    let tech_stack_str: Option<String> = row.get(18)?;
-    let tech_stack = tech_stack_str
-        .unwrap_or_default()
-        .split(',')
-        .filter(|s| !s.is_empty())
-        .map(String::from)
-        .collect();
-
     Ok(Card {
         id: row.get(0)?,
         session_id: row.get(1)?,
@@ -49,22 +37,19 @@ fn card_from_row(row: &Row<'_>) -> rusqlite::Result<Card> {
         value: row.get(4)?,
         summary: row.get(5)?,
         note: row.get(6)?,
-        category_id: row.get(7)?,
-        memory: row.get(8)?,
-        skill: row.get(9)?,
-        source_name: row.get(10)?,
-        project_name: row.get(11)?,
-        prompt_tokens: row.get(12)?,
-        completion_tokens: row.get(13)?,
-        cost_yuan: row.get(14)?,
-        feedback: row.get(15)?,
-        created_at: row.get(16)?,
-        updated_at: row.get(17)?,
+        publication_status: row.get(7)?,
+        source_name: row.get(8)?,
+        project_name: row.get(9)?,
+        prompt_tokens: row.get(10)?,
+        completion_tokens: row.get(11)?,
+        cost_yuan: row.get(12)?,
+        feedback: row.get(13)?,
+        created_at: row.get(14)?,
+        updated_at: row.get(15)?,
         tags: Vec::new(),
-        tech_stack,
-        // 19–20：与 `get_card` 中 JOIN sessions 列顺序一致
-        source_session_external_id: row.get(19)?,
-        source_session_path: row.get(20)?,
+        tech_stack: Vec::new(),
+        source_session_external_id: row.get(16)?,
+        source_session_path: row.get(17)?,
     })
 }
 
@@ -78,7 +63,7 @@ fn card_from_row(row: &Row<'_>) -> rusqlite::Result<Card> {
 
 /// 根据 CardFilters 构建 WHERE 子句和参数列表
 pub(super) fn build_card_where(filters: &CardFilters) -> (String, Vec<String>) {
-    let mut conds: Vec<String> = Vec::new();
+    let mut conds: Vec<String> = vec!["c.publication_status = 'published'".to_string()];
     let mut params: Vec<String> = Vec::new();
 
     if let Some(ref t) = filters.card_type {
@@ -101,7 +86,7 @@ pub(super) fn build_card_where(filters: &CardFilters) -> (String, Vec<String>) {
                 "c.id IN (\
                     SELECT ct.card_id FROM card_tags ct \
                     INNER JOIN tags t ON ct.tag_id = t.id \
-                    WHERE t.name IN ({placeholders}) \
+                    WHERE t.kind = 'topic' AND t.name IN ({placeholders}) \
                     GROUP BY ct.card_id HAVING COUNT(DISTINCT t.name) = {n}\
                 )"
             ));
@@ -109,7 +94,6 @@ pub(super) fn build_card_where(filters: &CardFilters) -> (String, Vec<String>) {
         }
     }
 
-    // 技术栈存为逗号分隔字符串；用边界匹配避免子串误命中（如 go / golang）
     if let Some(ref stacks) = filters.tech_stack {
         let unique: Vec<&String> = {
             let mut seen = std::collections::HashSet::new();
@@ -119,12 +103,15 @@ pub(super) fn build_card_where(filters: &CardFilters) -> (String, Vec<String>) {
                 .filter(|s| seen.insert(*s))
                 .collect()
         };
-        for s in unique {
-            conds.push(
-                "instr(',' || lower(ifnull(c.tech_stack, '')) || ',', ',' || lower(?) || ',') > 0"
-                    .to_string(),
-            );
-            params.push(s.clone());
+        if !unique.is_empty() {
+            let n = unique.len();
+            let placeholders = vec!["?"; n].join(",");
+            conds.push(format!(
+                "c.id IN (SELECT ct.card_id FROM card_tags ct INNER JOIN tags t ON ct.tag_id=t.id \
+                 WHERE t.kind='technology' AND t.name IN ({placeholders}) \
+                 GROUP BY ct.card_id HAVING COUNT(DISTINCT t.name)={n})"
+            ));
+            params.extend(unique.into_iter().cloned());
         }
     }
 
@@ -147,53 +134,63 @@ impl Database {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().to_rfc3339();
         let tags_joined = card.tags.join(",");
-        // tech_stack 同样逗号拼接存储
-        let tech_stack_joined = card.tech_stack.join(",");
+        let technologies_joined = card.tech_stack.join(",");
+        let publication_status = if card.value == Some("high") {
+            "published"
+        } else {
+            "draft"
+        };
 
         let mut conn = self.conn();
         let tx = conn.transaction()?;
 
-        //  19 列 = 15 个 ? 占位符 + 4 个 NULL（category_id, memory, skill, feedback）
-        //
-        //  id  session_id  title  type  value  summary  note
-        //  ?   ?           ?      ?     ?      ?        ?
-        //
-        //  category_id  memory  skill  source_name  project_name
-        //  NULL         NULL    NULL   ?            ?
-        //
-        //  prompt_tokens  completion_tokens  cost_yuan  feedback  tech_stack  created_at  updated_at
-        //  ?              ?                  ?          NULL      ?           ?           ?
         tx.execute(
             "INSERT INTO cards (
                 id, session_id, title, type, value, summary, note,
-                category_id, memory, skill, source_name, project_name,
-                prompt_tokens, completion_tokens, cost_yuan, feedback,
-                tech_stack, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, ?)",
+                publication_status, source_name, project_name,
+                prompt_tokens, completion_tokens, cost_yuan, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params![
-                &id, card.session_id, card.title, card.card_type, card.value,
-                card.summary, card.note, card.source_name, card.project_name,
-                card.prompt_tokens, card.completion_tokens, card.cost_yuan,
-                &tech_stack_joined, &now, &now,
+                &id,
+                card.session_id,
+                card.title,
+                card.card_type,
+                card.value,
+                card.summary,
+                card.note,
+                publication_status,
+                card.source_name,
+                card.project_name,
+                card.prompt_tokens,
+                card.completion_tokens,
+                card.cost_yuan,
+                &now,
+                &now,
             ],
         )?;
 
-        // 标签处理: INSERT OR IGNORE 保证幂等 → 查回 id → 关联
-        for tag_name in card.tags {
-            let tag_id = Uuid::new_v4().to_string();
-            tx.execute(
-                "INSERT OR IGNORE INTO tags (id, name, type) VALUES (?, ?, 'auto')",
-                params![&tag_id, tag_name.as_str()],
+        // 主题与技术项统一进入 tags，通过 kind 区分。
+        for (kind, names) in [("topic", card.tags), ("technology", card.tech_stack)] {
+            for tag_name in names {
+                let normalized = tag_name.trim().to_lowercase();
+                if normalized.is_empty() {
+                    continue;
+                }
+                let tag_id = Uuid::new_v4().to_string();
+                tx.execute(
+                "INSERT OR IGNORE INTO tags (id, name, normalized_name, kind) VALUES (?, ?, ?, ?)",
+                params![&tag_id, tag_name.trim(), &normalized, kind],
             )?;
-            let resolved_id: String = tx.query_row(
-                "SELECT id FROM tags WHERE name = ?",
-                params![tag_name.as_str()],
-                |row| row.get(0),
-            )?;
-            tx.execute(
-                "INSERT OR IGNORE INTO card_tags (card_id, tag_id) VALUES (?, ?)",
-                params![&id, &resolved_id],
-            )?;
+                let resolved_id: String = tx.query_row(
+                    "SELECT id FROM tags WHERE kind = ? AND normalized_name = ?",
+                    params![kind, &normalized],
+                    |row| row.get(0),
+                )?;
+                tx.execute(
+                    "INSERT OR IGNORE INTO card_tags (card_id, tag_id) VALUES (?, ?)",
+                    params![&id, &resolved_id],
+                )?;
+            }
         }
 
         // 同步 FTS5 全文索引（独立表，手动写入）
@@ -204,39 +201,39 @@ impl Database {
             |row| row.get(0),
         )?;
         tx.execute(
-            "INSERT INTO cards_fts(rowid, title, summary, note, tags) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO cards_fts(rowid, title, summary, note, tags, technologies) VALUES (?, ?, ?, ?, ?, ?)",
             params![
                 rowid,
                 card.title,
                 card.summary.unwrap_or_default(),
                 card.note,
                 &tags_joined,
+                &technologies_joined,
             ],
         )?;
 
         tx.commit()?;
         log::info!(
-            "创建卡片: id={}, title={:?}, value={:?}, tags=[{}], tech_stack列='{}' ({}段)",
+            "创建卡片: id={}, title={:?}, value={:?}, topics=[{}], technologies=[{}]",
             id,
             card.title,
             card.value,
             tags_joined,
-            tech_stack_joined,
-            card.tech_stack.len()
+            technologies_joined,
         );
         Ok(id)
     }
 
     /// 获取卡片完整信息（含关联标签）
     pub fn get_card(&self, id: &str) -> DbResult<Card> {
-        let conn = self.conn();
+        let conn = self.read_conn()?;
         let mut card = conn
             .query_row(
                 "SELECT c.id, c.session_id, c.title, c.type, c.value, c.summary, c.note, \
-                 c.category_id, c.memory, c.skill, c.source_name, c.project_name, \
+                 c.publication_status, c.source_name, c.project_name, \
                  c.prompt_tokens, c.completion_tokens, c.cost_yuan, c.feedback, \
-                 c.created_at, c.updated_at, c.tech_stack, \
-                 sess.session_id, COALESCE(sess.raw_path, sess.project_path) \
+                 c.created_at, c.updated_at, \
+                 sess.external_session_id, COALESCE(sess.raw_path, sess.project_path) \
                  FROM cards c \
                  INNER JOIN sessions sess ON c.session_id = sess.id \
                  WHERE c.id = ?",
@@ -248,13 +245,20 @@ impl Database {
 
         // 关联查询标签名
         let mut stmt = conn.prepare(
-            "SELECT t.name FROM tags t \
+            "SELECT t.name, t.kind FROM tags t \
              INNER JOIN card_tags ct ON t.id = ct.tag_id \
-             WHERE ct.card_id = ? ORDER BY t.name",
+             WHERE ct.card_id = ? ORDER BY t.kind, t.name",
         )?;
-        card.tags = stmt
-            .query_map(params![id], |row| row.get::<_, String>(0))?
-            .collect::<Result<Vec<_>, _>>()?;
+        for row in stmt.query_map(params![id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })? {
+            let (name, kind) = row?;
+            if kind == "technology" {
+                card.tech_stack.push(name);
+            } else {
+                card.tags.push(name);
+            }
+        }
         Ok(card)
     }
 
@@ -270,7 +274,7 @@ impl Database {
         let limit = page_size as i64;
         let offset = (page - 1) as i64 * limit;
 
-        let conn = self.conn();
+        let conn = self.read_conn()?;
 
         let count_sql = format!("SELECT COUNT(*) FROM cards c{}", where_sql);
         let total: i64 = conn.query_row(
@@ -300,16 +304,20 @@ impl Database {
 
     /// 库内卡片总数（不受筛选；供「导出全部」前提示条数）
     pub fn count_all_cards(&self) -> DbResult<u64> {
-        let n: i64 = self
-            .conn()
-            .query_row("SELECT COUNT(*) FROM cards", [], |r| r.get(0))?;
+        let n: i64 = self.read_conn()?.query_row(
+            "SELECT COUNT(*) FROM cards WHERE publication_status='published'",
+            [],
+            |r| r.get(0),
+        )?;
         Ok(n.max(0) as u64)
     }
 
     /// 全部卡片 id（按创建时间升序，批量导出顺序稳定）
     pub fn list_all_card_ids(&self) -> DbResult<Vec<String>> {
-        let conn = self.conn();
-        let mut stmt = conn.prepare("SELECT id FROM cards ORDER BY created_at ASC")?;
+        let conn = self.read_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id FROM cards WHERE publication_status='published' ORDER BY created_at ASC",
+        )?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
     }
@@ -338,11 +346,7 @@ impl Database {
         }
         tx.commit()?;
         if !ids.is_empty() {
-            log::info!(
-                "已删除会话 {} 下的 {} 张旧卡片",
-                session_db_id,
-                ids.len()
-            );
+            log::info!("已删除会话 {} 下的 {} 张旧卡片", session_db_id, ids.len());
         }
         Ok(ids.len() as u64)
     }
@@ -380,11 +384,13 @@ impl Database {
 
     /// 查询所有标签及其关联的卡片数量（按数量降序），用于知识库侧栏标签筛选。
     pub fn list_all_tags(&self) -> DbResult<Vec<TagCount>> {
-        let conn = self.conn();
+        let conn = self.read_conn()?;
         let mut stmt = conn.prepare(
             "SELECT t.name, COUNT(ct.card_id) as cnt
              FROM tags t
              LEFT JOIN card_tags ct ON t.id = ct.tag_id
+             LEFT JOIN cards c ON c.id = ct.card_id
+             WHERE t.kind = 'topic' AND c.publication_status = 'published'
              GROUP BY t.id, t.name
              HAVING cnt > 0
              ORDER BY cnt DESC, t.name ASC",
@@ -398,48 +404,34 @@ impl Database {
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
     }
 
-    /// 从 `cards.tech_stack` 逗号分隔列聚合技术栈及卡片命中次数（知识库侧栏「技术栈」区块）。
-    /// 展示名取**首次出现**的写法；统计时按小写合并（Rust/rust 视为同一项）。
+    /// 聚合 tags.kind=technology 的已发布卡片数量。
     pub fn list_all_tech_stack_counts(&self) -> DbResult<Vec<TagCount>> {
-        let conn = self.conn();
+        let conn = self.read_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT tech_stack FROM cards WHERE tech_stack IS NOT NULL AND TRIM(tech_stack) != ''",
+            "SELECT t.name, COUNT(ct.card_id) AS cnt
+             FROM tags t
+             JOIN card_tags ct ON ct.tag_id = t.id
+             JOIN cards c ON c.id = ct.card_id
+             WHERE t.kind = 'technology' AND c.publication_status = 'published'
+             GROUP BY t.id, t.name
+             ORDER BY cnt DESC, t.name ASC",
         )?;
-        let mut counts: HashMap<String, (String, i64)> = HashMap::new();
-        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-        for row in rows {
-            let s = row?;
-            for part in s.split(',') {
-                let t = part.trim();
-                if t.is_empty() {
-                    continue;
-                }
-                let key = t.to_lowercase();
-                let e = counts
-                    .entry(key)
-                    .or_insert_with(|| (t.to_string(), 0));
-                e.1 += 1;
-            }
-        }
-        let mut v: Vec<TagCount> = counts
-            .into_values()
-            .map(|(name, count)| TagCount { name, count })
-            .collect();
-        v.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.name.cmp(&b.name)));
-        log::debug!(
-            "list_all_tech_stack_counts: {} 个不同技术栈条目",
-            v.len()
-        );
-        Ok(v)
+        let rows = stmt.query_map([], |row| {
+            Ok(TagCount {
+                name: row.get(0)?,
+                count: row.get(1)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
     }
 
     /// 按知识类型统计卡片数量（按数量降序），用于知识库侧栏类型筛选。
     pub fn list_card_type_counts(&self) -> DbResult<Vec<TypeCount>> {
-        let conn = self.conn();
+        let conn = self.read_conn()?;
         let mut stmt = conn.prepare(
             r#"SELECT "type", COUNT(*) as cnt
                FROM cards
-               WHERE "type" IS NOT NULL AND "type" != ''
+               WHERE publication_status = 'published'
                GROUP BY "type"
                ORDER BY cnt DESC, "type" ASC"#,
         )?;
@@ -450,5 +442,85 @@ impl Database {
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stores_topic_and_technology_tags_and_hides_drafts_from_library() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("cards.db")).unwrap();
+        let session_id = db
+            .insert_session(
+                "codex",
+                "external",
+                "local",
+                None,
+                None,
+                0,
+                Some("hash"),
+                "/tmp/source",
+                "2026-08-30T00:00:00Z",
+                "2026-08-30T00:00:00Z",
+                None,
+            )
+            .unwrap();
+        let topics = vec!["全文检索".to_string()];
+        let technologies = vec!["SQLite".to_string(), "Rust".to_string()];
+        let high_id = db
+            .insert_card(&NewCard {
+                session_id: &session_id,
+                title: "SQLite FTS5 索引",
+                card_type: Some("implementation"),
+                value: Some("high"),
+                summary: Some("建立 trigram 索引"),
+                note: "SQLite FTS5 trigram",
+                source_name: Some("Codex"),
+                project_name: None,
+                prompt_tokens: 1,
+                completion_tokens: 1,
+                cost_yuan: 0.0,
+                tags: &topics,
+                tech_stack: &technologies,
+            })
+            .unwrap();
+        let draft_id = db
+            .insert_card(&NewCard {
+                session_id: &session_id,
+                title: "草稿",
+                card_type: Some("explanation"),
+                value: Some("medium"),
+                summary: Some("待确认"),
+                note: "draft body",
+                source_name: Some("Codex"),
+                project_name: None,
+                prompt_tokens: 1,
+                completion_tokens: 1,
+                cost_yuan: 0.0,
+                tags: &topics,
+                tech_stack: &technologies,
+            })
+            .unwrap();
+
+        assert_eq!(
+            db.get_card(&high_id).unwrap().publication_status,
+            "published"
+        );
+        assert_eq!(db.get_card(&draft_id).unwrap().publication_status, "draft");
+        assert_eq!(
+            db.list_cards(&CardFilters::default(), 1, 20).unwrap().total,
+            1
+        );
+        assert_eq!(db.list_all_tags().unwrap()[0].name, "全文检索");
+        assert_eq!(db.list_all_tech_stack_counts().unwrap().len(), 2);
+        assert_eq!(
+            db.search_cards("SQLite", &CardFilters::default())
+                .unwrap()
+                .len(),
+            1
+        );
     }
 }

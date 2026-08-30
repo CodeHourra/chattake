@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::path::Path;
 
 use chrono::Utc;
 use rusqlite::params;
@@ -125,7 +126,7 @@ fn session_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session
 /// card_title / card_summary / card_type 均以 analysis_* 列兜底，
 /// 确保低/无价值会话（无 Card 产出）在列表中也能展示类型徽章、标题和摘要。
 const SESSION_SUMMARY_COLUMNS: &str = "\
-    s.id, s.source_id, s.session_id, s.source_host, s.project_path, s.project_name, \
+    s.id, s.source_id, s.external_session_id, s.source_host, s.project_path, s.project_name, \
     s.message_count, s.status, s.value, s.updated_at, s.has_updates, s.created_at, \
     (SELECT c.id      FROM cards c WHERE c.session_id = s.id ORDER BY c.created_at DESC LIMIT 1), \
     (SELECT COALESCE(SUM(LENGTH(m.content)), 0) FROM messages m WHERE m.session_id = s.id), \
@@ -153,7 +154,22 @@ const SESSION_SUMMARY_COLUMNS: &str = "\
        ORDER BY m.seq_order ASC LIMIT 1)";
 
 impl Database {
-    /// 导入会话。使用 INSERT OR IGNORE 实现去重（唯一键: session_id + source_host）。
+    pub fn source_file_unchanged(
+        &self,
+        source_id: &str,
+        raw_path: &Path,
+        mtime_ms: i64,
+        size_bytes: i64,
+    ) -> DbResult<bool> {
+        let path = raw_path.to_string_lossy();
+        self.read_conn()?.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sessions WHERE source_id=?1 AND raw_path=?2 AND raw_mtime_ms=?3 AND raw_size_bytes=?4)",
+            params![source_id, path.as_ref(), mtime_ms, size_bytes],
+            |row| row.get(0),
+        ).map_err(DbError::from)
+    }
+
+    /// 导入会话。使用 INSERT OR IGNORE 实现去重（唯一键: source + external id + host）。
     ///
     /// 返回数据库主键 ID（新插入时为新 UUID，冲突时返回已有记录的 ID）。
     pub fn insert_session(
@@ -174,20 +190,30 @@ impl Database {
         let conn = self.conn();
         let rows = conn.execute(
             "INSERT OR IGNORE INTO sessions (
-                id, source_id, session_id, source_host, project_path, project_name,
+                id, source_id, external_session_id, source_host, project_path, project_name,
                 message_count, content_hash, raw_path, created_at, updated_at, analysis_title
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params![
-                &id, source_id, session_id, source_host, project_path, project_name,
-                message_count, content_hash, raw_path, created_at, updated_at, analysis_title,
+                &id,
+                source_id,
+                session_id,
+                source_host,
+                project_path,
+                project_name,
+                message_count,
+                content_hash,
+                raw_path,
+                created_at,
+                updated_at,
+                analysis_title,
             ],
         )?;
 
         if rows == 0 {
             // 唯一约束冲突 → 查询已有记录的 ID 返回
             let existing: String = conn.query_row(
-                "SELECT id FROM sessions WHERE session_id = ?1 AND source_host = ?2",
-                params![session_id, source_host],
+                "SELECT id FROM sessions WHERE source_id = ?1 AND external_session_id = ?2 AND source_host = ?3",
+                params![source_id, session_id, source_host],
                 |row| row.get(0),
             )?;
             log::debug!("会话已存在: session_id={}, db_id={}", session_id, existing);
@@ -195,18 +221,16 @@ impl Database {
         } else {
             log::info!(
                 "导入会话: source={}, project={:?}, messages={}",
-                source_id, project_name, message_count
+                source_id,
+                project_name,
+                message_count
             );
             Ok(id)
         }
     }
 
     /// 批量写入消息（事务内执行，保证原子性）
-    pub fn insert_messages(
-        &self,
-        session_db_id: &str,
-        messages: &[NewMessage],
-    ) -> DbResult<()> {
+    pub fn insert_messages(&self, session_db_id: &str, messages: &[NewMessage]) -> DbResult<()> {
         let conn = self.conn();
         let tx = conn.unchecked_transaction()?;
         for (seq_order, msg) in messages.iter().enumerate() {
@@ -216,8 +240,14 @@ impl Database {
                     id, session_id, role, content, timestamp, tokens_in, tokens_out, seq_order
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
                 params![
-                    id, session_db_id, msg.role, msg.content,
-                    msg.timestamp, msg.tokens_in, msg.tokens_out, seq_order as i32
+                    id,
+                    session_db_id,
+                    msg.role,
+                    msg.content,
+                    msg.timestamp,
+                    msg.tokens_in,
+                    msg.tokens_out,
+                    seq_order as i32
                 ],
             )?;
         }
@@ -227,9 +257,9 @@ impl Database {
     }
 
     pub fn get_session(&self, id: &str) -> DbResult<Session> {
-        let conn = self.conn();
+        let conn = self.read_conn()?;
         conn.query_row(
-            "SELECT id, source_id, session_id, source_host, project_path, project_name,
+            "SELECT id, source_id, external_session_id, source_host, project_path, project_name,
                     message_count, content_hash, raw_path, created_at, updated_at,
                     status, value, has_updates, analyzed_at, error_message, analysis_title
              FROM sessions WHERE id = ?1",
@@ -263,7 +293,7 @@ impl Database {
     }
 
     pub fn get_session_messages(&self, session_id: &str) -> DbResult<Vec<Message>> {
-        let conn = self.conn();
+        let conn = self.read_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, session_id, role, content, timestamp, tokens_in, tokens_out, seq_order
              FROM messages WHERE session_id = ?1 ORDER BY seq_order ASC",
@@ -294,14 +324,13 @@ impl Database {
     ) -> DbResult<PaginatedResult<SessionSummary>> {
         let (where_clause, param_values) = session_filters_where_clause(filters);
 
-        let conn = self.conn();
+        let conn = self.read_conn()?;
 
         // 先查总数
         let count_sql = format!("SELECT COUNT(*) FROM sessions{}", where_clause);
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             param_values.iter().map(|b| b.as_ref()).collect();
-        let total: i64 = conn
-            .query_row(&count_sql, param_refs.as_slice(), |row| row.get(0))?;
+        let total: i64 = conn.query_row(&count_sql, param_refs.as_slice(), |row| row.get(0))?;
 
         // 再查当页数据
         let offset = page.saturating_sub(1) as i64 * page_size as i64;
@@ -339,7 +368,7 @@ impl Database {
         for g in groups {
             let (where_clause, param_values) = session_filters_where_clause(g);
             let list_sql = format!("SELECT id FROM sessions{}", where_clause);
-            let conn = self.conn();
+            let conn = self.read_conn()?;
             let param_refs: Vec<&dyn rusqlite::types::ToSql> =
                 param_values.iter().map(|b| b.as_ref()).collect();
             let mut stmt = conn.prepare(&list_sql)?;
@@ -384,17 +413,18 @@ impl Database {
         Ok(ids.len() as u64)
     }
 
-    /// 检查是否已存在相同的会话（去重键: session_id + source_host）
+    /// 检查是否已存在相同的会话（去重键: source_id + external_session_id + source_host）
     pub fn check_duplicate(
         &self,
+        source_id: &str,
         session_id: &str,
         source_host: &str,
     ) -> DbResult<Option<String>> {
-        let conn = self.conn();
+        let conn = self.read_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id FROM sessions WHERE session_id = ?1 AND source_host = ?2 LIMIT 1",
+            "SELECT id FROM sessions WHERE source_id = ?1 AND external_session_id = ?2 AND source_host = ?3 LIMIT 1",
         )?;
-        let mut rows = stmt.query(params![session_id, source_host])?;
+        let mut rows = stmt.query(params![source_id, session_id, source_host])?;
         match rows.next()? {
             Some(row) => Ok(Some(row.get(0)?)),
             None => Ok(None),
@@ -432,7 +462,12 @@ impl Database {
         if n == 0 {
             return Err(DbError::NotFound(id.to_string()));
         }
-        log::info!("会话状态变更: id={}, status={}, value={:?}", id, status, value);
+        log::info!(
+            "会话状态变更: id={}, status={}, value={:?}",
+            id,
+            status,
+            value
+        );
         Ok(())
     }
 
@@ -452,7 +487,12 @@ impl Database {
         if n == 0 {
             return Err(DbError::NotFound(id.to_string()));
         }
-        log::debug!("写入 analysis_meta: id={}, type={}, title={}", id, card_type, title);
+        log::debug!(
+            "写入 analysis_meta: id={}, type={}, title={}",
+            id,
+            card_type,
+            title
+        );
         Ok(())
     }
 
@@ -511,7 +551,10 @@ impl Database {
             [],
         )?;
         if n > 0 {
-            log::info!("启动清理：已将 {} 个残留 analyzing 状态的会话重置为 pending", n);
+            log::info!(
+                "启动清理：已将 {} 个残留 analyzing 状态的会话重置为 pending",
+                n
+            );
         }
         Ok(n)
     }
@@ -531,7 +574,7 @@ impl Database {
     ///
     /// 返回扁平的分组列表，前端负责组装成树结构。
     pub fn get_session_groups(&self) -> DbResult<Vec<SessionGroupCount>> {
-        let conn = self.conn();
+        let conn = self.read_conn()?;
         let mut stmt = conn.prepare(
             "SELECT source_id, source_host, project_name, COUNT(*) as cnt
              FROM sessions

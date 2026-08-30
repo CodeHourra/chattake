@@ -1,28 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-// ─────────────────────────────── 数据源 ───────────────────────────────
-
-/// 数据源配置（如 Claude Code、Cursor 等 AI IDE）
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)] // v0.2 设置页面使用
-pub struct Source {
-    pub id: String,
-    /// 数据源显示名称，如 "Claude Code"
-    pub name: String,
-    /// 是否启用该数据源的采集
-    pub enabled: bool,
-    /// 扫描目录列表，JSON 数组格式存储
-    pub scan_paths: Option<String>,
-    /// 最近一次同步时间 (RFC 3339)
-    pub last_sync: Option<String>,
-    /// 数据源专属配置，JSON 格式
-    pub config: Option<String>,
-}
-
 // ─────────────────────────────── 会话 ─────────────────────────────────
 //
 //  一条 Session 对应一次 AI 对话（如 Claude Code 的一个 JSONL 文件）。
-//  去重键: (session_id, source_host)
+//  去重键: (source_id, session_id, source_host)
 
 /// AI 对话会话完整信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -161,12 +142,8 @@ pub struct Card {
     pub summary: Option<String>,
     /// Markdown 格式的完整技术笔记
     pub note: String,
-    /// 所属分类 ID（v0.1 暂未使用）
-    pub category_id: Option<String>,
-    /// LLM 生成的 Memory 规则（v0.2 实现）
-    pub memory: Option<String>,
-    /// LLM 生成的 Skill 定义（v0.2 实现）
-    pub skill: Option<String>,
+    /// draft | published
+    pub publication_status: String,
     /// 来源数据源名称（冗余存储，方便展示）
     pub source_name: Option<String>,
     /// 来源项目名称（冗余存储，方便展示）
@@ -184,7 +161,7 @@ pub struct Card {
     /// 通过 card_tags + tags 表 JOIN 查询填充，不直接存储在 cards 表
     #[serde(default)]
     pub tags: Vec<String>,
-    /// LLM 提炼时识别到的技术栈（如 Rust、SQLite、Tauri 等），逗号分隔存储
+    /// LLM 提炼时识别到的技术项（通过 tags.kind=technology 关联）
     #[serde(default)]
     pub tech_stack: Vec<String>,
     /// 来源会话在数据源侧的标识（`sessions.session_id`，非 DB 主键 `sessions.id`）
@@ -195,7 +172,7 @@ pub struct Card {
     pub source_session_path: Option<String>,
 }
 
-/// 卡片列表轻量版（不含 note、memory、skill 等大字段）
+/// 卡片列表轻量版（不含 note 等大字段）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CardSummary {
@@ -206,7 +183,7 @@ pub struct CardSummary {
     pub card_type: Option<String>,
     pub value: Option<String>,
     pub summary: Option<String>,
-    pub category_id: Option<String>,
+    pub publication_status: String,
     pub source_name: Option<String>,
     pub project_name: Option<String>,
     pub created_at: String,
@@ -220,54 +197,9 @@ pub struct CardSummary {
 #[allow(dead_code)] // v0.2 标签管理页使用
 pub struct Tag {
     pub id: String,
-    /// 标签名称（唯一约束）
     pub name: String,
-    /// 标签来源: auto（LLM 生成）| manual（用户创建）
-    #[serde(rename = "type")]
-    pub tag_type: Option<String>,
-    /// 使用该标签的卡片数量（非实时计算）
-    pub count: i64,
-}
-
-// ─────────────────────────────── 同步日志 ──────────────────────────────
-
-/// 数据源同步操作日志
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)] // v0.2 同步历史页使用
-pub struct SyncLog {
-    pub id: String,
-    /// 触发同步的数据源 ID
-    pub source_id: String,
-    pub started_at: String,
-    pub finished_at: Option<String>,
-    /// 本次扫描发现的会话总数
-    pub sessions_found: i64,
-    /// 本次新导入的会话数
-    pub sessions_new: i64,
-    /// 本次检测到更新的会话数
-    pub sessions_updated: i64,
-    /// 同步状态: running | completed | failed
-    pub status: String,
-}
-
-// ─────────────────────────────── Token 用量 ───────────────────────────
-
-/// LLM 调用的 Token 用量与费用记录
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)] // v0.2 费用统计页使用
-pub struct TokenUsage {
-    pub id: String,
-    /// 关联的知识卡片 ID
-    pub card_id: Option<String>,
-    /// LLM 提供商名称（如 openai、deepseek）
-    pub provider: String,
-    /// 使用的模型名称
-    pub model: String,
-    pub prompt_tokens: i64,
-    pub completion_tokens: i64,
-    /// 费用（元）
-    pub cost_yuan: f64,
-    pub created_at: String,
+    pub normalized_name: String,
+    pub kind: String,
 }
 
 // ─────────────────────────────── 写入用结构体 ─────────────────────────
@@ -278,9 +210,9 @@ pub struct TokenUsage {
 pub struct NewCard<'a> {
     pub session_id: &'a str,
     pub title: &'a str,
-    /// 知识类型: debug | architecture | performance | best-practice | ...
+    /// 知识类型: decision | troubleshooting | implementation | explanation | snippet
     pub card_type: Option<&'a str>,
-    /// 价值等级: high | medium | low | none
+    /// 产出卡片时仅为 high | medium
     pub value: Option<&'a str>,
     pub summary: Option<&'a str>,
     /// Markdown 格式技术笔记
@@ -293,7 +225,7 @@ pub struct NewCard<'a> {
     pub cost_yuan: f64,
     /// LLM 生成的标签列表
     pub tags: &'a [String],
-    /// LLM 识别的技术栈列表（如 ["Rust", "SQLite", "Tauri"]）
+    /// LLM 识别的技术项（写入 tags.kind=technology）
     pub tech_stack: &'a [String],
 }
 
@@ -383,6 +315,6 @@ pub struct CardFilters {
     pub value: Option<String>,
     /// FTS5 全文搜索关键词
     pub search: Option<String>,
-    /// 按技术栈名称筛选（AND 语义；与 `cards.tech_stack` 逗号分隔字段逐 token 匹配，大小写不敏感）
+    /// 按 tags.kind=technology 筛选（AND 语义）
     pub tech_stack: Option<Vec<String>>,
 }
