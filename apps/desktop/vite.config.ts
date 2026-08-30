@@ -15,7 +15,7 @@ export default defineConfig({
   // 强制 vue 单例，防止 bun/pnpm 混合安装导致多份 Vue 实例
   resolve: {
     alias: {
-      '@xunji/shared': sharedRoot,
+      '@chattake/shared': sharedRoot,
     },
     dedupe: ['vue'],
   },

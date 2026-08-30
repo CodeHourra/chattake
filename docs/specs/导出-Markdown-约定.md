@@ -1,6 +1,6 @@
 # 导出 Markdown 格式约定（v0.1.1）
 
-寻迹将知识卡片导出为 **单个 `.md` 文件**：文件开头为 **YAML frontmatter**，随后空行接 **正文**（与库内 `note` 字段一致，已是 Markdown）。
+有得将知识卡片导出为 **单个 `.md` 文件**：文件开头为 **YAML frontmatter**，随后空行接 **正文**（与库内 `note` 字段一致，已是 Markdown）。
 
 ## 文件命名
 

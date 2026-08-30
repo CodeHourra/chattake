@@ -36,11 +36,11 @@ impl AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // 开发构建（`bun run tauri dev` / cargo dev）：默认开启提炼载荷全文日志（与 sidecar 的 XUNJI_LOG_DISTILL_PAYLOAD=1 一致）。
-    // 发布构建不设置；若需在本机关闭，启动前可 export XUNJI_LOG_DISTILL_PAYLOAD=0。
+    // 开发构建（`bun run tauri dev` / cargo dev）：默认开启提炼载荷全文日志（与 sidecar 的 CHATTAKE_LOG_DISTILL_PAYLOAD=1 一致）。
+    // 发布构建不设置；若需在本机关闭，启动前可 export CHATTAKE_LOG_DISTILL_PAYLOAD=0。
     #[cfg(debug_assertions)]
-    if std::env::var_os("XUNJI_LOG_DISTILL_PAYLOAD").is_none() {
-        std::env::set_var("XUNJI_LOG_DISTILL_PAYLOAD", "1");
+    if std::env::var_os("CHATTAKE_LOG_DISTILL_PAYLOAD").is_none() {
+        std::env::set_var("CHATTAKE_LOG_DISTILL_PAYLOAD", "1");
     }
 
     // 默认 info 级别，可通过 RUST_LOG 环境变量覆盖（如 RUST_LOG=debug）
@@ -70,7 +70,7 @@ pub fn run() {
         .map(|path| Arc::new(SidecarManager::new(path)));
 
     if sidecar.is_none() {
-        log::warn!("Sidecar 未就绪：提炼功能将不可用，直至构建或安装 xunji-sidecar");
+        log::warn!("Sidecar 未就绪：提炼功能将不可用，直至构建或安装 chattake-sidecar");
     }
 
     let state = AppState {

@@ -1,5 +1,5 @@
 /**
- * 寻迹 Sidecar 入口 —— JSON-RPC 2.0 Server。
+ * 有得 Sidecar 入口 —— JSON-RPC 2.0 Server。
  *
  * Rust 通过 stdin/stdout 与本进程通信，协议为 JSON-RPC 2.0。
  * 每行一个 JSON 请求，每行一个 JSON 响应。

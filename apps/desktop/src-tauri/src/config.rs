@@ -172,13 +172,13 @@ impl AppConfig {
     pub fn default_path() -> PathBuf {
         dirs::home_dir()
             .expect("无法获取用户主目录")
-            .join(".xunji/config.toml")
+            .join(".chattake/config.toml")
     }
 
     pub fn load(path: Option<&Path>) -> ConfigResult<Self> {
         let config_path = path
             .map(Path::to_path_buf)
-            .or_else(|| std::env::var("XUNJI_CONFIG").ok().map(PathBuf::from))
+            .or_else(|| std::env::var("CHATTAKE_CONFIG").ok().map(PathBuf::from))
             .unwrap_or_else(Self::default_path);
 
         if !config_path.exists() {

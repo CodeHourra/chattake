@@ -1,7 +1,7 @@
 /**
  * 记录「即将发往 OpenAI-compatible API」的 messages 摘要，便于对照 UI 与会话原文。
  *
- * 环境变量 XUNJI_LOG_DISTILL_PAYLOAD=1：向 stderr 打印完整 system / user 正文（可能很长，仅排查时开启）。
+ * 环境变量 CHATTAKE_LOG_DISTILL_PAYLOAD=1：向 stderr 打印完整 system / user 正文（可能很长，仅排查时开启）。
  * 桌面应用开发构建（tauri dev）会在未设置时默认置为 1；设为 0 可关闭。
  */
 
@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto'
 import { distillLog } from './trace'
 
 /** 与 Rust 端 `log_rpc_distill_payload` 使用同一环境变量，便于同时开全文 */
-export const ENV_DISTILL_PAYLOAD_FULL = 'XUNJI_LOG_DISTILL_PAYLOAD'
+export const ENV_DISTILL_PAYLOAD_FULL = 'CHATTAKE_LOG_DISTILL_PAYLOAD'
 
 const PREVIEW_CHARS = 2500
 

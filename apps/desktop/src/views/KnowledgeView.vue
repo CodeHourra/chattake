@@ -2,7 +2,7 @@
 /**
  * 知识库 —— 笔记卡片列表 / 卡片网格双视图，内容区固定高度可滚动，分页贴底。
  *
- * 视图模式持久化：localStorage key `xunji:knowledgeViewMode`
+ * 视图模式持久化：localStorage key `chattake:knowledgeViewMode`
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
@@ -18,7 +18,7 @@ import {
   useMessage,
   useDialog,
 } from 'naive-ui'
-import { getCardTypeLabel } from '@xunji/shared'
+import { getCardTypeLabel } from '@chattake/shared'
 import { api } from '../lib/tauri'
 import { exportAllCardsToDir, exportSelectedCards } from '../lib/cardExport'
 import type { CardSummary, TagRecord } from '../types'
@@ -26,7 +26,7 @@ import { useFiltersStore } from '../stores/filters'
 import { useSidebarStore } from '../stores/sidebar'
 import Pagination from '../components/Pagination.vue'
 
-const VIEW_MODE_KEY = 'xunji:knowledgeViewMode'
+const VIEW_MODE_KEY = 'chattake:knowledgeViewMode'
 type ViewMode = 'list' | 'card'
 
 const router = useRouter()

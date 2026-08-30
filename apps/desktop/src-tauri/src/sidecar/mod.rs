@@ -2,15 +2,15 @@
 //!
 //! ```text
 //! Rust (SidecarManager)
-//!   ├── spawn() → 启动 xunji-sidecar 进程
+//!   ├── spawn() → 启动 chattake-sidecar 进程
 //!   ├── call()  → 通过 RpcClient 发送 JSON-RPC 请求
 //!   └── stop()  → 终止进程
 //! ```
 //!
 //! 解析顺序（后者为兜底）：
-//! 1. 开发：仓库 `packages/sidecar/dist/xunji-sidecar`（tauri dev / cargo run）
-//! 2. 安装包：`resource_dir/xunji-sidecar`（与 `tauri.conf.json` 的 `bundle.resources` 一致）
-//! 3. 用户全局：`~/.xunji/bin/xunji-sidecar`
+//! 1. 开发：仓库 `packages/sidecar/dist/chattake-sidecar`（tauri dev / cargo run）
+//! 2. 安装包：`resource_dir/chattake-sidecar`（与 `tauri.conf.json` 的 `bundle.resources` 一致）
+//! 3. 用户全局：`~/.chattake/bin/chattake-sidecar`
 
 pub mod rpc;
 
@@ -47,7 +47,7 @@ impl SidecarManager {
     ///
     /// `package_info` 来自 [`tauri::generate_context!`]，用于与 Tauri CLI 相同的 `resource_dir` 解析（跨平台）。
     pub fn find_binary(package_info: &PackageInfo) -> Option<PathBuf> {
-        find_companion_binary(package_info, "xunji-sidecar", "sidecar")
+        find_companion_binary(package_info, "chattake-sidecar", "sidecar")
     }
 
     /// 查找开发目录、安装包资源或用户目录中的伴随二进制。
@@ -69,8 +69,8 @@ fn find_companion_binary(
 
     // 1) 开发模式：从 packages/sidecar/dist/ 加载
     // CARGO_MANIFEST_DIR = .../apps/desktop/src-tauri
-    // parent×3: src-tauri → desktop → apps → xunji root
-    // Bun `--compile` 在 Windows 上产出 `xunji-sidecar.exe`，与 Unix 无后缀名不同
+    // parent×3: src-tauri → desktop → apps → chattake root
+    // Bun `--compile` 在 Windows 上产出 `chattake-sidecar.exe`，与 Unix 无后缀名不同
     let file_name = if cfg!(target_os = "windows") {
         format!("{binary_name}.exe")
     } else {
@@ -94,7 +94,7 @@ fn find_companion_binary(
         }
     }
 
-    // 2) 安装包内：macOS/Linux 为 `xunji-sidecar`，Windows 为 `xunji-sidecar.exe`（见 tauri.windows.conf.json）
+    // 2) 安装包内：macOS/Linux 为 `chattake-sidecar`，Windows 为 `chattake-sidecar.exe`（见 tauri.windows.conf.json）
     if let Ok(dir) = resource_dir(package_info, &env) {
         let bundled = dir.join(&file_name);
         if bundled.exists() {
@@ -105,7 +105,7 @@ fn find_companion_binary(
 
     // 3) 全局安装位置（可选覆盖）
     if let Some(home) = dirs::home_dir() {
-        let global_path = home.join(".xunji/bin").join(&file_name);
+        let global_path = home.join(".chattake/bin").join(&file_name);
         if global_path.exists() {
             log::info!("使用全局 sidecar: {}", global_path.display());
             return Some(global_path);

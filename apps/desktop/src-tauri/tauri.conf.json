@@ -1,8 +1,8 @@
 {
   "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-cli/schema.json",
-  "productName": "XunJi",
+  "productName": "ChatTake",
   "version": "0.2.0",
-  "identifier": "com.xunji.app",
+  "identifier": "com.chattake.desktop",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "寻迹 - AI 编程知识平台",
+        "title": "有得 · AI 对话知识库",
         "width": 1280,
         "height": 800,
         "minWidth": 960,
@@ -33,18 +33,18 @@
       "icons/128x128@2x.png"
     ],
     "resources": {
-      "../../../packages/sidecar/dist/xunji-sidecar": "xunji-sidecar",
-      "../../../packages/mcp-server/dist/xunji-mcp": "xunji-mcp"
+      "../../../packages/sidecar/dist/chattake-sidecar": "chattake-sidecar",
+      "../../../packages/mcp-server/dist/chattake-mcp": "chattake-mcp"
     },
     "macOS": {
-      "bundleName": "寻迹"
+      "bundleName": "有得"
     }
   },
   "plugins": {
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlENzEzM0RBODkxQ0Y3QTEKUldTaDl4eUoyak54blV5a2huR0h2dUxML3ozYXE1enhtTHlMbzc1NEVaakJld010N1NmUXFjdXgK",
       "endpoints": [
-        "https://github.com/CodeHourra/xunji/releases/latest/download/latest.json"
+        "https://github.com/CodeHourra/chattake/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"

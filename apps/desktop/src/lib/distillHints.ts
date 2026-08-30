@@ -4,7 +4,7 @@
 
 /** 是否在文案中追加 Sidecar / 配置相关提示 */
 export function shouldAppendSidecarHint(message: string): boolean {
-  return /sidecar|xunji-sidecar|未找到.*可执行|distill_session join/i.test(message)
+  return /sidecar|chattake-sidecar|未找到.*可执行|distill_session join/i.test(message)
 }
 
 export function shouldAppendApiHint(message: string): boolean {

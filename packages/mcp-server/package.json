@@ -1,11 +1,11 @@
 {
-  "name": "@xunji/mcp-server",
+  "name": "@chattake/mcp-server",
   "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "bun run src/index.ts",
-    "build": "bun build src/index.ts --compile --outfile dist/xunji-mcp",
+    "build": "bun build src/index.ts --compile --outfile dist/chattake-mcp",
     "test": "bun test"
   },
   "dependencies": {

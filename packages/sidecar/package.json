@@ -1,15 +1,15 @@
 {
-  "name": "@xunji/sidecar",
+  "name": "@chattake/sidecar",
   "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "bun run src/index.ts",
-    "build": "bun build src/index.ts --compile --outfile dist/xunji-sidecar",
+    "build": "bun build src/index.ts --compile --outfile dist/chattake-sidecar",
     "test": "bun test"
   },
   "dependencies": {
-    "@xunji/shared": "workspace:*",
+    "@chattake/shared": "workspace:*",
     "openai": "^4"
   },
   "devDependencies": {

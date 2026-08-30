@@ -1,4 +1,4 @@
-# 寻迹（XunJi）产品需求文档 PRD
+# 有得（ChatTake）产品需求文档 PRD
 
 > **历史愿景文档**：本文包含尚未实现和已取消的早期设想，不可作为当前能力清单。v0.2.0 的实施边界以 [`../plans/2026-08-30-v0.2.0-架构与功能重构.md`](../plans/2026-08-30-v0.2.0-架构与功能重构.md) 为准。
 
@@ -26,7 +26,7 @@
 
 ### 1.1 产品定位
 
-**寻迹**是一款面向个人开发者的 AI 编程知识平台，将散落在 Cursor、Claude Code、CodeBuddy 等多个 AI IDE 中的对话记录，自动同步、提炼、分类，沉淀为个人可搜索、可复用的技术知识库。
+**有得**是一款面向个人开发者的 AI 编程知识平台，将散落在 Cursor、Claude Code、CodeBuddy 等多个 AI IDE 中的对话记录，自动同步、提炼、分类，沉淀为个人可搜索、可复用的技术知识库。
 
 > 追寻每一次和 AI 对话的思维轨迹
 
@@ -112,7 +112,7 @@
 
 **CodeBuddy CLI（独立 JSONL 流，与扩展会话目录不同）**
 
-> 寻迹当前版本对 CodeBuddy 的采集实现为 **CodeBuddyExtension** 根目录下的会话目录（`index.json` + `messages/`，见上表）；下表为 CLI 侧 JSONL 行格式，供对照，**非**当前采集主路径。
+> 有得当前版本对 CodeBuddy 的采集实现为 **CodeBuddyExtension** 根目录下的会话目录（`index.json` + `messages/`，见上表）；下表为 CLI 侧 JSONL 行格式，供对照，**非**当前采集主路径。
 
 ```json
 {
@@ -179,7 +179,7 @@
 
 #### 远端采集（SSH 模式）
 
-> 参考问渠的 SSH + rsync 方案，寻迹需支持同样的远端采集能力（Claude Code / CodeBuddy 经常运行在远端 Linux 服务器上）。
+> 参考问渠的 SSH + rsync 方案，有得需支持同样的远端采集能力（Claude Code / CodeBuddy 经常运行在远端 Linux 服务器上）。
 
 **Linux 路径扫描规则（问渠实测验证）：**
 
@@ -342,7 +342,7 @@ API Provider        CLI Provider
 
 #### 3.2.2 自动提炼触发机制
 
-寻迹是客户端应用，不常驻后台，触发策略围绕"启动时"和"用户主动"设计：
+有得是客户端应用，不常驻后台，触发策略围绕"启动时"和"用户主动"设计：
 
 **触发优先级：**
 
@@ -464,7 +464,7 @@ Launch Agent（轻量，每 2 小时，可配置间隔）
 
 #### 3.2.4 提示词设计（来自问渠借鉴）
 
-> **参考来源**：问渠（https://git.woa.com/ti-ai/wenqu）是腾讯内部同类产品，已实测验证以下提示词在实际工程中的效果。以下两套提示词可作为寻迹 Distiller 的起点，可在此基础上迭代优化。
+> **参考来源**：问渠（https://git.woa.com/ti-ai/wenqu）是腾讯内部同类产品，已实测验证以下提示词在实际工程中的效果。以下两套提示词可作为有得 Distiller 的起点，可在此基础上迭代优化。
 
 ---
 
@@ -690,9 +690,9 @@ def truncate_for_ai(content: str, max_chars: int = 12000) -> str:
 **存储方案：** 本地 SQLite + 文件系统
 
 ```
-~/.xunji/
+~/.chattake/
 ├── db/
-│   └── xunji.db          # 主数据库（SQLite）
+│   └── chattake.db          # 主数据库（SQLite）
 ├── cards/
 │   └── YYYY-MM/
 │       └── <card-id>.md  # 知识卡片 Markdown 文件
@@ -749,17 +749,17 @@ def truncate_for_ai(content: str, max_chars: int = 12000) -> str:
 
 **MCP Server 模式（核心！）**
 
-寻迹作为本地 MCP Server，提供以下工具给 AI IDE 调用：
+有得作为本地 MCP Server，提供以下工具给 AI IDE 调用：
 
 ```
 tools:
-  - xunji_search(query, tags?, limit?)     # 语义检索知识库
-  - xunji_get_card(card_id)                # 获取完整知识卡片
-  - xunji_list_tags()                      # 列出所有标签
-  - xunji_add_note(title, content, tags?)  # 快速添加笔记到知识库
+  - chattake_search(query, tags?, limit?)     # 语义检索知识库
+  - chattake_get_card(card_id)                # 获取完整知识卡片
+  - chattake_list_tags()                      # 列出所有标签
+  - chattake_add_note(title, content, tags?)  # 快速添加笔记到知识库
 ```
 
-这样 Cursor/Claude Code 在写代码时，可以直接检索寻迹的本地知识库，实现**"AI 用你自己积累的知识帮你写代码"**的闭环。
+这样 Cursor/Claude Code 在写代码时，可以直接检索有得的本地知识库，实现**"AI 用你自己积累的知识帮你写代码"**的闭环。
 
 **REST API 模式（可选）**
 
@@ -779,11 +779,11 @@ tools:
 ├────────────┬─────────────────────────┬────────────────────────┤
 │            │                         │                        │
 │ 📱 Cursor  │  会话列表 / 知识库       │  详情面板              │
-│  ├ xunji   │                         │  （原始对话 or 卡片）   │
+│  ├ chattake   │                         │  （原始对话 or 卡片）   │
 │  └ myproj  │                         │                        │
 │            │                         │                        │
 │ 🤖 Claude  │                         │                        │
-│  └ xunji   │                         │                        │
+│  └ chattake   │                         │                        │
 │            │                         │                        │
 │ 🛠 CodeBuddy│                         │                        │
 │  └ myproj  │                         │                        │
@@ -801,10 +801,10 @@ tools:
 
 ```
 ├── Cursor (20)
-│   ├── xunji (12)
+│   ├── chattake (12)
 │   └── my-project (8)
 ├── Claude Code (34)
-│   ├── xunji (34)
+│   ├── chattake (34)
 │   └── openclaw (6)
 └── CodeBuddy (15)
     └── my-project (15)
@@ -823,11 +823,11 @@ tools:
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ ☑  📁 xunji  │  修复 WebSocket 断连重连问题           │
+│ ☑  📁 chattake  │  修复 WebSocket 断连重连问题           │
 │              │  🏷 debug  🔥 high   03-19  Claude    │
 │              │  💬 42条消息                           │
 ├─────────────────────────────────────────────────────┤
-│ ☑  📁 xunji  │  ⚠️ 会话有更新，可重新分析             │  ← 黄色角标
+│ ☑  📁 chattake  │  ⚠️ 会话有更新，可重新分析             │  ← 黄色角标
 │              │  🏷 implementation  ✅ 已分析  03-18   │
 ├─────────────────────────────────────────────────────┤
 │ ☑  📁 myproj │  实现批量并发分析逻辑                  │
@@ -903,7 +903,7 @@ tools:
 │ ```                                                  │
 │                                                      │
 │ ──────────────────────────────────────               │
-│ 📅 2026-03-19  💬 来自 Claude Code / xunji            │
+│ 📅 2026-03-19  💬 来自 Claude Code / chattake            │
 │ [✨ 重新分析]                                         │
 └──────────────────────────────────────────────────────┘
 ```

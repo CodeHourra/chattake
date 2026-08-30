@@ -327,7 +327,7 @@ function close() { emit('update:show', false) }
             <template v-else-if="mcpInfo">
               <n-descriptions :column="1" bordered size="small">
                 <n-descriptions-item label="状态"><n-tag :type="mcpInfo.available ? 'success' : 'warning'" size="small">{{ mcpInfo.available ? '可用' : '未构建' }}</n-tag></n-descriptions-item>
-                <n-descriptions-item label="程序路径"><span class="font-mono text-xs break-all">{{ mcpInfo.binaryPath ?? '请先构建 xunji-mcp' }}</span></n-descriptions-item>
+                <n-descriptions-item label="程序路径"><span class="font-mono text-xs break-all">{{ mcpInfo.binaryPath ?? '请先构建 chattake-mcp' }}</span></n-descriptions-item>
                 <n-descriptions-item label="数据库"><span class="font-mono text-xs break-all">{{ mcpInfo.databasePath }}</span></n-descriptions-item>
               </n-descriptions>
               <template v-if="mcpInfo.configSnippet">
@@ -338,9 +338,9 @@ function close() { emit('update:show', false) }
           </div>
         </n-tab-pane>
 
-        <n-tab-pane name="about" tab="关于寻迹">
+        <n-tab-pane name="about" tab="关于有得">
           <div class="settings-scroll py-4 space-y-4">
-            <div class="text-center"><h3 class="text-lg font-semibold">寻迹 XunJi</h3><p class="text-xs text-neutral-500 mt-1">从 AI 编程对话中沉淀可复用知识。</p></div>
+            <div class="text-center"><h3 class="text-lg font-semibold">有得 · AI 对话知识库</h3><p class="text-xs text-neutral-500 mt-1">ChatTake — 让每次 AI 对话，都有所得</p></div>
             <div v-if="aboutLoading" class="flex justify-center py-8"><n-spin /></div>
             <n-alert v-else-if="aboutError" type="warning">{{ aboutError }}</n-alert>
             <n-descriptions v-else-if="aboutMeta" :column="1" bordered size="small">

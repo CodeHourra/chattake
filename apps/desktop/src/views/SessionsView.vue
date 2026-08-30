@@ -10,7 +10,7 @@ import { useSearchStore } from '../stores/search'
 import { useAnalysisQueueStore } from '../stores/analysisQueue'
 import { api } from '../lib/tauri'
 import { appendDistillHint } from '../lib/distillHints'
-import { getCardTypeLabel } from '@xunji/shared'
+import { getCardTypeLabel } from '@chattake/shared'
 
 const sessions = useSessionsStore()
 const router = useRouter()

@@ -1,4 +1,4 @@
-# 寻迹 v0.2.0 配置示例。实际文件：~/.xunji/config.toml
+# 有得 v0.2.0 配置示例。实际文件：~/.chattake/config.toml
 
 [distiller]
 active_profile_id = "siliconflow-main"

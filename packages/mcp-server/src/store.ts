@@ -32,10 +32,10 @@ function labelsAsArrays(row: Record<string, unknown> | null) {
 }
 
 export function defaultDatabasePath() {
-  return process.env.XUNJI_DB || join(homedir(), '.xunji', 'db', 'xunji.db')
+  return process.env.CHATTAKE_DB || join(homedir(), '.chattake', 'db', 'chattake.db')
 }
 
-export class XunjiStore {
+export class ChatTakeStore {
   private readonly db: Database
 
   constructor(path = defaultDatabasePath()) {

@@ -90,14 +90,14 @@ async function onSync() {
       <!-- Logo 区域 -->
       <div class="flex items-center gap-3">
         <div class="app-mark w-8 h-8 rounded-lg flex items-center justify-center">
-          <span class="i-lucide-footprints w-5 h-5" />
+          <span class="i-lucide-book-open-check w-5 h-5" aria-hidden="true" />
         </div>
         <div class="flex flex-col">
           <h1 class="font-bold text-[15px] leading-tight tracking-wide text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-            寻迹
+            有得
             <span class="app-version px-1 py-0.5 rounded text-[9px] font-bold tracking-wider">0.2</span>
           </h1>
-          <span class="text-[10px] text-slate-500 dark:text-slate-400 font-medium leading-tight tracking-wide">AI 编程知识沉淀</span>
+          <span class="text-[10px] text-slate-500 dark:text-slate-400 font-medium leading-tight tracking-wide">AI 对话知识库</span>
         </div>
       </div>
 

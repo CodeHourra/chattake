@@ -10,8 +10,8 @@ export type MainTab = 'sessions' | 'library'
 export const useUiStore = defineStore('ui', () => {
   const activeTab = ref<MainTab>('sessions')
   const sidebarWidth = ref(280)
-  const darkMode = ref(localStorage.getItem('xunji:theme') === 'dark'
-    || (!localStorage.getItem('xunji:theme') && matchMedia('(prefers-color-scheme: dark)').matches))
+  const darkMode = ref(localStorage.getItem('chattake:theme') === 'dark'
+    || (!localStorage.getItem('chattake:theme') && matchMedia('(prefers-color-scheme: dark)').matches))
 
   function toggleTheme() {
     darkMode.value = !darkMode.value
@@ -26,7 +26,7 @@ export const useUiStore = defineStore('ui', () => {
       } else {
         root.classList.remove('dark')
       }
-      localStorage.setItem('xunji:theme', v ? 'dark' : 'light')
+      localStorage.setItem('chattake:theme', v ? 'dark' : 'light')
     },
     { immediate: true },
   )

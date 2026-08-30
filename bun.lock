@@ -3,10 +3,10 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "xunji",
+      "name": "chattake",
     },
     "apps/desktop": {
-      "name": "@xunji/desktop",
+      "name": "@chattake/desktop",
       "version": "0.2.0",
       "dependencies": {
         "@tauri-apps/api": "^2",
@@ -14,7 +14,7 @@
         "@tauri-apps/plugin-process": "^2",
         "@tauri-apps/plugin-updater": "^2",
         "@vueuse/core": "^14.2.1",
-        "@xunji/shared": "workspace:*",
+        "@chattake/shared": "workspace:*",
         "highlight.js": "^11.11.1",
         "marked": "^15.0.7",
         "naive-ui": "^2.44.1",
@@ -40,7 +40,7 @@
       },
     },
     "packages/mcp-server": {
-      "name": "@xunji/mcp-server",
+      "name": "@chattake/mcp-server",
       "version": "0.2.0",
       "dependencies": {
         "@modelcontextprotocol/server": "^2.0.0",
@@ -48,14 +48,14 @@
       },
     },
     "packages/shared": {
-      "name": "@xunji/shared",
+      "name": "@chattake/shared",
       "version": "0.2.0",
     },
     "packages/sidecar": {
-      "name": "@xunji/sidecar",
+      "name": "@chattake/sidecar",
       "version": "0.2.0",
       "dependencies": {
-        "@xunji/shared": "workspace:*",
+        "@chattake/shared": "workspace:*",
         "openai": "^4",
       },
       "devDependencies": {
@@ -320,13 +320,13 @@
 
     "@vueuse/shared": ["@vueuse/shared@14.2.1", "https://mirrors.tencent.com/npm/@vueuse/shared/-/shared-14.2.1.tgz", { "peerDependencies": { "vue": "^3.5.0" } }, "sha512-shTJncjV9JTI4oVNyF1FQonetYAiTBd+Qj7cY89SWbXSkx7gyhrgtEdF2ZAVWS1S3SHlaROO6F2IesJxQEkZBw=="],
 
-    "@xunji/desktop": ["@xunji/desktop@workspace:apps/desktop"],
+    "@chattake/desktop": ["@chattake/desktop@workspace:apps/desktop"],
 
-    "@xunji/mcp-server": ["@xunji/mcp-server@workspace:packages/mcp-server"],
+    "@chattake/mcp-server": ["@chattake/mcp-server@workspace:packages/mcp-server"],
 
-    "@xunji/shared": ["@xunji/shared@workspace:packages/shared"],
+    "@chattake/shared": ["@chattake/shared@workspace:packages/shared"],
 
-    "@xunji/sidecar": ["@xunji/sidecar@workspace:packages/sidecar"],
+    "@chattake/sidecar": ["@chattake/sidecar@workspace:packages/sidecar"],
 
     "abort-controller": ["abort-controller@3.0.0", "https://mirrors.tencent.com/npm/abort-controller/-/abort-controller-3.0.0.tgz", { "dependencies": { "event-target-shim": "^5.0.0" } }, "sha512-h8lQ8tacZYnR3vNQTgibj+tODHI5/+l06Au2Pcriv/Gmet0eaj4TwWH41sO9wnHDiQsEj19q0drzdWdeAHtweg=="],
 

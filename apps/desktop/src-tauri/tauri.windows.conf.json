@@ -2,8 +2,8 @@
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
     "resources": {
-      "../../../packages/sidecar/dist/xunji-sidecar.exe": "xunji-sidecar.exe",
-      "../../../packages/mcp-server/dist/xunji-mcp.exe": "xunji-mcp.exe"
+      "../../../packages/sidecar/dist/chattake-sidecar.exe": "chattake-sidecar.exe",
+      "../../../packages/mcp-server/dist/chattake-mcp.exe": "chattake-mcp.exe"
     }
   }
 }

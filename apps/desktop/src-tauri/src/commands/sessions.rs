@@ -450,7 +450,7 @@ fn utf8_safe_suffix(s: &str, max_bytes: usize) -> &str {
 
 /// 记录 JSON-RPC 中传给 sidecar 的 `content`（未经 clean/truncate）。
 /// 与 sidecar 日志里 `user.md5[0:16]`：若预处理未改长度则应与 API 侧 user 一致。
-/// 设置环境变量 `XUNJI_LOG_DISTILL_PAYLOAD=1` 可打印完整正文（排查后关闭）。
+/// 设置环境变量 `CHATTAKE_LOG_DISTILL_PAYLOAD=1` 可打印完整正文（排查后关闭）。
 fn log_rpc_distill_payload(trace_id: &str, label: &str, content: &str) {
     let digest = md5::compute(content.as_bytes());
     let hex_full = format!("{:x}", digest);
@@ -481,12 +481,12 @@ fn log_rpc_distill_payload(trace_id: &str, label: &str, content: &str) {
             tail
         );
     }
-    if std::env::var("XUNJI_LOG_DISTILL_PAYLOAD")
+    if std::env::var("CHATTAKE_LOG_DISTILL_PAYLOAD")
         .map(|v| v == "1")
         .unwrap_or(false)
     {
         log::info!(
-            "trace_id={} | {}: [FULL 由 XUNJI_LOG_DISTILL_PAYLOAD=1 开启]\n{}",
+            "trace_id={} | {}: [FULL 由 CHATTAKE_LOG_DISTILL_PAYLOAD=1 开启]\n{}",
             trace_id,
             label,
             content

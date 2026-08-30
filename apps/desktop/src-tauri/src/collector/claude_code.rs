@@ -97,7 +97,7 @@ impl ClaudeCodeCollector {
                 continue;
             }
 
-            // 目录名形如 "-Users-steve-Codes-myspace-ai-project-xunji"
+            // 目录名形如 "-Users-steve-Codes-myspace-ai-project-chattake"
             // 可以反推项目路径：将 - 替换为 /（首个 - 是分隔符）
             let dir_name = entry.file_name().to_string_lossy().to_string();
             let (project_path, project_name) = derive_project_info(&dir_name);
@@ -372,8 +372,8 @@ fn truncate_str(s: &str, max_chars: usize) -> &str {
 
 /// 从 Claude Code 的 projects 目录名反推项目路径和名称。
 ///
-/// 目录名格式: "-Users-steve-Codes-myspace-ai-project-xunji"
-/// 转换规则: 将 "-" 替换为 "/"，得到 "/Users/steve/Codes/myspace/ai-project/xunji"
+/// 目录名格式: "-Users-steve-Codes-myspace-ai-project-chattake"
+/// 转换规则: 将 "-" 替换为 "/"，得到 "/Users/steve/Codes/myspace/ai-project/chattake"
 ///
 /// 注意：此推导不完全准确（路径中的 "-" 会被混淆），所以优先使用 JSONL 内的 cwd 字段。
 fn derive_project_info(dir_name: &str) -> (Option<String>, Option<String>) {
@@ -460,12 +460,12 @@ mod tests {
 
     #[test]
     fn test_derive_project_info() {
-        let (path, name) = derive_project_info("-Users-steve-Codes-myspace-ai-project-xunji");
+        let (path, name) = derive_project_info("-Users-steve-Codes-myspace-ai-project-chattake");
         assert_eq!(
             path,
-            Some("/Users/steve/Codes/myspace/ai/project/xunji".to_string())
+            Some("/Users/steve/Codes/myspace/ai/project/chattake".to_string())
         );
-        assert_eq!(name, Some("xunji".to_string()));
+        assert_eq!(name, Some("chattake".to_string()));
     }
 
     #[test]

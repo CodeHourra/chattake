@@ -1,4 +1,4 @@
-# 寻迹（XunJi）更新日志
+# 有得（ChatTake）更新日志
 
 > 面向使用者的更新说明。实现细节见 `docs/CHANGELOG.md`。
 
@@ -6,6 +6,7 @@
 
 ### 新增
 
+- **全新品牌**：产品正式更名为「有得 · ChatTake」，应用、数据目录、MCP、安装包和仓库标识同步更新，不保留旧名称兼容层。
 - **四来源采集**：正式支持 Claude Code、Cursor、Codex、CodeBuddy，启动时只扫描变化，不会自动消耗模型 Token。
 - **多 API 配置**：可保存 OpenAI、DeepSeek、Moonshot、智谱、硅基流动及自定义 OpenAI-compatible 配置；任务固定使用启动时选择的配置。
 - **知识草稿**：高价值知识自动发布，中价值进入草稿；重新分析先生成草稿，不覆盖已有知识。
@@ -22,13 +23,13 @@
 ### 不兼容调整
 
 - 删除 LLM CLI Provider、所有 `*-internal` 路径和旧分类/Memory/Skill 数据模型。
-- 旧数据库会在可恢复备份成功后重建，备份位于 `~/.xunji/db/backups/`。
+- 旧数据库会在可恢复备份成功后重建，备份位于 `~/.chattake/db/backups/`。
 
 ## 0.1.7（2026-03-26）
 
 ### 开发体验
 
-- **本地 macOS 打包**：`make macos` 在未设置环境变量时，会尝试从 `apps/desktop/xunji.updater.key` 注入 `TAURI_SIGNING_PRIVATE_KEY`（与 CI 一致；私钥文件勿提交）。详见 `docs/macOS 打包说明.md`。
+- **本地 macOS 打包**：`make macos` 在未设置环境变量时，会尝试从 `apps/desktop/chattake.updater.key` 注入 `TAURI_SIGNING_PRIVATE_KEY`（与 CI 一致；私钥文件勿提交）。详见 `docs/macOS 打包说明.md`。
 
 ---
 
@@ -44,7 +45,7 @@
 
 ### 体验改进
 
-- **桌面端品牌与安装包**：安装包、GitHub Release 资源文件名使用 **XunJi** 前缀（避免部分环境下非 ASCII 文件名异常）；macOS 程序坞与启动台等仍显示 **「寻迹」**。
+- **桌面端品牌与安装包**：安装包、GitHub Release 资源文件名使用 **ChatTake** 前缀（避免部分环境下非 ASCII 文件名异常）；macOS 程序坞与启动台等仍显示 **「有得」**。
 
 ---
 

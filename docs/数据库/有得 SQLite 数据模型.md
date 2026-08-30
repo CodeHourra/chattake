@@ -1,14 +1,14 @@
-# 寻迹（XunJi）SQLite 数据模型
+# 有得（ChatTake）SQLite 数据模型
 
-> 当前版本：Schema v7 / 寻迹 v0.2.0。权威 DDL 位于 `apps/desktop/src-tauri/src/storage/migrations.rs`。
+> 当前版本：Schema v7 / 有得 v0.2.0。权威 DDL 位于 `apps/desktop/src-tauri/src/storage/migrations.rs`。
 
 ## 连接与升级
 
-- 默认数据库：`~/.xunji/db/xunji.db`。
+- 默认数据库：`~/.chattake/db/chattake.db`。
 - 桌面端使用一个串行写连接；列表、搜索和详情使用短生命周期只读连接。
 - SQLite 开启 `foreign_keys=ON`、WAL 和 5 秒 `busy_timeout`。
-- v1–v6 升级到 v7 前，先用 `VACUUM INTO` 备份到 `~/.xunji/db/backups/`；备份失败立即中止，v7 允许随后重建。
-- MCP 以 `query_only=ON` 打开 `XUNJI_DB` 或默认数据库，不执行迁移。
+- v1–v6 升级到 v7 前，先用 `VACUUM INTO` 备份到 `~/.chattake/db/backups/`；备份失败立即中止，v7 允许随后重建。
+- MCP 以 `query_only=ON` 打开 `CHATTAKE_DB` 或默认数据库，不执行迁移。
 
 ## 实体关系
 

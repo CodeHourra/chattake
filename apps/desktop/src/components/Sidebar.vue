@@ -16,7 +16,7 @@ import { useUiStore } from '../stores/ui'
 import { useFiltersStore } from '../stores/filters'
 import { useSessionsStore } from '../stores/sessions'
 import { useSidebarStore } from '../stores/sidebar'
-import { getCardTypeLabel } from '@xunji/shared'
+import { getCardTypeLabel } from '@chattake/shared'
 import { api } from '../lib/tauri'
 import type { SessionFilterPayload } from '../types'
 

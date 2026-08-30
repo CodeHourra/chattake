@@ -40,7 +40,7 @@ Uncaught TypeError: Cannot read properties of null (reading 'ce')
 
 ### 3.2 根本原因：bun + pnpm 混用安装依赖
 
-项目最初用 **bun** 安装依赖（`bun install`），依赖存放在根目录 `node_modules/.bun/` 下。后续为安装 naive-ui，使用了 **pnpm**（`pnpm add naive-ui --filter @xunji/desktop`），pnpm 在 `apps/desktop/node_modules/.pnpm/` 下创建了独立的依赖树。
+项目最初用 **bun** 安装依赖（`bun install`），依赖存放在根目录 `node_modules/.bun/` 下。后续为安装 naive-ui，使用了 **pnpm**（`pnpm add naive-ui --filter @chattake/desktop`），pnpm 在 `apps/desktop/node_modules/.pnpm/` 下创建了独立的依赖树。
 
 Vite 预构建（dep optimization）时的解析路径：
 

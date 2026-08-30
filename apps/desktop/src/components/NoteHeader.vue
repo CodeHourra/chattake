@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { NTag } from 'naive-ui'
-import { getCardTypeLabel } from '@xunji/shared'
+import { getCardTypeLabel } from '@chattake/shared'
 
 defineProps<{
   title: string

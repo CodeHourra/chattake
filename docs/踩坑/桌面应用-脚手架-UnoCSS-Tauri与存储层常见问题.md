@@ -1,6 +1,6 @@
 # 踩坑：脚手架阶段 — UnoCSS、Tauri 布局、存储层与 CSP
 
-本文汇总在 **寻迹 v0.1 脚手架与 Phase 1～2（存储层）** 开发中遇到的典型问题：**现象 → 原因 → 解决办法**。与「图标在构建后全部丢失」相关的 Node/Bun 版本与 `node:util.styleText` 问题，见同目录 [构建-UnoCSS-生产构建图标丢失.md](./构建-UnoCSS-生产构建图标丢失.md)。
+本文汇总在 **有得 v0.1 脚手架与 Phase 1～2（存储层）** 开发中遇到的典型问题：**现象 → 原因 → 解决办法**。与「图标在构建后全部丢失」相关的 Node/Bun 版本与 `node:util.styleText` 问题，见同目录 [构建-UnoCSS-生产构建图标丢失.md](./构建-UnoCSS-生产构建图标丢失.md)。
 
 ---
 
@@ -49,7 +49,7 @@
 lsof -ti:1420 | xargs kill -9
 
 # 或结束残留桌面进程
-pkill -f xunji-desktop
+pkill -f chattake-desktop
 ```
 
 重新执行 `npm run tauri dev`（或项目 Makefile/脚本里等价命令）。
@@ -229,4 +229,4 @@ env_logger::Builder::from_env(
 
 ---
 
-*文档整理自寻迹 v0.1 脚手架与存储层开发过程中的问题记录，随实现迭代可继续补充。*
+*文档整理自有得 v0.1 脚手架与存储层开发过程中的问题记录，随实现迭代可继续补充。*

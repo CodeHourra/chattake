@@ -35,5 +35,5 @@ Thumbs.db
 .env
 .env.local
 
-# XunJi runtime data
-.xunji/
+# ChatTake runtime data
+.chattake/

@@ -25,7 +25,7 @@ pub type DbResult<T> = Result<T, DbError>;
 /// 应用数据库，封装 SQLite 连接。
 ///
 /// 使用 Mutex 保证多线程安全（Tauri 的 invoke 在异步线程中调用）。
-/// 默认路径: ~/.xunji/db/xunji.db
+/// 默认路径: ~/.chattake/db/chattake.db
 pub struct Database {
     conn: Mutex<Connection>,
     path: PathBuf,
@@ -64,10 +64,10 @@ impl Database {
         Ok(db)
     }
 
-    /// 使用默认路径 ~/.xunji/db/xunji.db 打开数据库
+    /// 使用默认路径 ~/.chattake/db/chattake.db 打开数据库
     pub fn open_default() -> DbResult<Self> {
         let base = dirs::home_dir().expect("无法获取用户主目录");
-        let path = base.join(".xunji").join("db").join("xunji.db");
+        let path = base.join(".chattake").join("db").join("chattake.db");
         Self::open(&path)
     }
 
@@ -107,7 +107,7 @@ fn backup_before_rebuild(conn: &Connection, db_path: &Path, version: u32) -> DbR
     fs::create_dir_all(&backup_dir)?;
     let stamp = Utc::now().format("%Y%m%d-%H%M%S");
     let backup_path = backup_dir.join(format!(
-        "xunji-v{version}-{stamp}-{}.db",
+        "chattake-v{version}-{stamp}-{}.db",
         &Uuid::new_v4().to_string()[..8]
     ));
     conn.execute(
@@ -125,7 +125,7 @@ mod tests {
     #[test]
     fn backs_up_before_rebuilding_old_database() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("xunji.db");
+        let path = dir.path().join("chattake.db");
         let old = Connection::open(&path).unwrap();
         old.execute_batch(
             "CREATE TABLE legacy(id INTEGER); INSERT INTO legacy VALUES(1); PRAGMA user_version=6;",

@@ -1,5 +1,5 @@
 {
-  "name": "xunji",
+  "name": "chattake",
   "private": true,
   "scripts": {
     "sync:changelog": "node scripts/sync-changelog.mjs",

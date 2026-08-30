@@ -2,8 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<!-- 与 tauri.conf productName「XunJi」分离：安装包/DMG 文件名用 ASCII，程序坞与启动台显示中文品牌名 -->
+	<!-- 安装包使用 ChatTake，程序坞与启动台显示中文品牌名 -->
 	<key>CFBundleDisplayName</key>
-	<string>寻迹</string>
+	<string>有得</string>
 </dict>
 </plist>

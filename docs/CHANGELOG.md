@@ -1,4 +1,4 @@
-# 寻迹（XunJi）更新日志 — 技术说明
+# 有得（ChatTake）更新日志 — 技术说明
 
 > 本文档与仓库根目录 `CHANGELOG.md` 的版本一一对应，保留**实现向**表述（字段名、路径、数据结构等），供开发、排查与文档对照使用。  
 > **面向最终用户的说明请以根目录 `CHANGELOG.md` 为准。**
@@ -23,7 +23,7 @@
 
 - Light/Dark Token、结构性液态玻璃、四来源品牌资产、真实任务中心、消息游标分页和懒加载；单生产 Chunk 低于 500 KB。
 - `@modelcontextprotocol/server` v2 + `serveStdio`；四个工具只读访问已发布知识，stdout 仅承载 JSON-RPC。
-- 构建资源同时包含 `xunji-sidecar` 与 `xunji-mcp`。
+- 构建资源同时包含 `chattake-sidecar` 与 `chattake-mcp`。
 
 ---
 
@@ -31,7 +31,7 @@
 
 ### 构建与文档
 
-- **Makefile**：`macos` 目标增加 `TAURI_SIGNING_PRIVATE_KEY` / `xunji.updater.key` 检查与导出
+- **Makefile**：`macos` 目标增加 `TAURI_SIGNING_PRIVATE_KEY` / `chattake.updater.key` 检查与导出
 - **docs/macOS 打包说明.md**：产物路径与命名说明
 
 ---
@@ -49,7 +49,7 @@
 
 ### 体验与构建
 
-- **Tauri**：`productName` 为 `XunJi`；`bundle.macOS.bundleName` 与 `Info.plist` 的 `CFBundleDisplayName` 为「寻迹」；关于页「应用名称」固定展示品牌名
+- **Tauri**：`productName` 为 `ChatTake`；`bundle.macOS.bundleName` 与 `Info.plist` 的 `CFBundleDisplayName` 为「有得」；关于页「应用名称」固定展示品牌名
 - **Release**：恢复/保持 `release.yml` 全矩阵（macOS aarch64 + x86_64、Windows）
 
 ---

@@ -33,8 +33,7 @@ defineProps<{
           class="text-neutral-600 dark:text-neutral-300 truncate min-w-0"
           :title="projectName || undefined"
         >
-          <!-- {{ projectName ?? '—' }} -->
-          <span class="i-lucide-footprints w-5 h-5" />
+          {{ projectName ?? '—' }}
         </span>
       </span>
       <span class="inline-flex items-center gap-1.5 shrink-0 tabular-nums">

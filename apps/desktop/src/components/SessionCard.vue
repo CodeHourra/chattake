@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { getCardTypeLabel } from '@xunji/shared'
+import { getCardTypeLabel } from '@chattake/shared'
 import { NTag, NButton, NCheckbox, NTooltip } from 'naive-ui'
 import type { SessionSummary } from '../types'
 

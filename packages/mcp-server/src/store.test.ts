@@ -3,9 +3,9 @@ import { afterAll, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { XunjiStore } from './store'
+import { ChatTakeStore } from './store'
 
-const dir = mkdtempSync(join(tmpdir(), 'xunji-mcp-'))
+const dir = mkdtempSync(join(tmpdir(), 'chattake-mcp-'))
 const path = join(dir, 'test.db')
 const db = new Database(path)
 db.exec(`
@@ -15,16 +15,16 @@ db.exec(`
   CREATE TABLE tags(id TEXT PRIMARY KEY,name TEXT,normalized_name TEXT,kind TEXT);
   CREATE TABLE card_tags(card_id TEXT,tag_id TEXT);
   CREATE VIRTUAL TABLE cards_fts USING fts5(title,summary,note,tags,technologies,tokenize='trigram');
-  INSERT INTO sessions VALUES('s1','codex','external-1','xunji');
+  INSERT INTO sessions VALUES('s1','codex','external-1','chattake');
   INSERT INTO messages VALUES('s1','user','如何修复超时？',NULL,0),('s1','assistant','增加可取消超时。',NULL,1);
-  INSERT INTO cards VALUES('published','s1','修复超时','troubleshooting','high','避免无效超时','正文','published','Codex','xunji','now','now');
-  INSERT INTO cards VALUES('draft','s1','隐藏草稿','decision','medium','不应可见','草稿正文','draft','Codex','xunji','now','now');
+  INSERT INTO cards VALUES('published','s1','修复超时','troubleshooting','high','避免无效超时','正文','published','Codex','chattake','now','now');
+  INSERT INTO cards VALUES('draft','s1','隐藏草稿','decision','medium','不应可见','草稿正文','draft','Codex','chattake','now','now');
   INSERT INTO tags VALUES('t1','Rust','rust','technology'),('t2','性能','性能','topic');
   INSERT INTO card_tags VALUES('published','t1'),('published','t2'),('draft','t2');
   INSERT INTO cards_fts(rowid,title,summary,note,tags,technologies) SELECT rowid,title,summary,note,'性能','Rust' FROM cards;
 `)
 db.close()
-const store = new XunjiStore(path)
+const store = new ChatTakeStore(path)
 
 afterAll(() => { store.close(); rmSync(dir, { recursive: true, force: true }) })
 

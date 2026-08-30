@@ -1,10 +1,10 @@
 import { join } from 'path'
 import { homedir } from 'os'
 
-export const XUNJI_HOME = join(homedir(), '.xunji')
-export const XUNJI_DB_PATH = join(XUNJI_HOME, 'db', 'xunji.db')
-export const XUNJI_CONFIG_PATH = join(XUNJI_HOME, 'config.toml')
-export const XUNJI_LOG_DIR = join(XUNJI_HOME, 'logs')
+export const CHATTAKE_HOME = join(homedir(), '.chattake')
+export const CHATTAKE_DB_PATH = join(CHATTAKE_HOME, 'db', 'chattake.db')
+export const CHATTAKE_CONFIG_PATH = join(CHATTAKE_HOME, 'config.toml')
+export const CHATTAKE_LOG_DIR = join(CHATTAKE_HOME, 'logs')
 
 export const DEFAULT_CLAUDE_CODE_DIRS = [join(homedir(), '.claude')]
 

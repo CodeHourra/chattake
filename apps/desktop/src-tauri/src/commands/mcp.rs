@@ -16,13 +16,13 @@ pub struct McpInfo {
 pub fn get_mcp_info(app: AppHandle, state: State<'_, AppState>) -> Result<McpInfo, String> {
     let database_path = state.db.path().to_string_lossy().into_owned();
     let binary =
-        SidecarManager::find_companion_binary(app.package_info(), "xunji-mcp", "mcp-server");
+        SidecarManager::find_companion_binary(app.package_info(), "chattake-mcp", "mcp-server");
     let config_snippet = binary.as_ref().map(|path| {
         serde_json::to_string_pretty(&serde_json::json!({
             "mcpServers": {
-                "xunji": {
+                "chattake": {
                     "command": path.to_string_lossy(),
-                    "env": { "XUNJI_DB": database_path }
+                    "env": { "CHATTAKE_DB": database_path }
                 }
             }
         }))
