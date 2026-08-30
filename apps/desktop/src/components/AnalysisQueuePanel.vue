@@ -129,20 +129,19 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.task-center { position: fixed; right: 20px; bottom: 20px; z-index: 60; width: min(360px, calc(100vw - 32px)); max-height: min(520px, calc(100vh - 100px)); overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-glass); box-shadow: 0 18px 54px rgba(20, 24, 22, .15); backdrop-filter: blur(22px) saturate(1.08); }
+.task-center { position: fixed; right: 20px; bottom: 20px; z-index: 60; width: min(360px, calc(100vw - 32px)); max-height: min(520px, calc(100vh - 100px)); overflow: hidden; border: 1px solid var(--line); border-radius: var(--panel-radius); background: var(--surface-glass); box-shadow: 0 18px 46px rgba(20, 24, 22, .13); backdrop-filter: blur(20px) saturate(1.06); }
 .dark .task-center { --task-bg: #171917; border-color: rgba(255,255,255,.1); }
 .task-header { display: flex; align-items: center; justify-content: space-between; padding: 11px 13px; border-bottom: 1px solid rgba(122,125,117,.16); }
-.task-list { max-height: 442px; overflow-y: auto; padding: 10px; }
-.job-card { padding: 12px; border: 1px solid rgba(122,125,117,.16); border-radius: 12px; background: rgba(255,255,255,.42); }
-.job-card + .job-card { margin-top: 8px; }
-.dark .job-card { background: rgba(0,0,0,.14); }
+.task-list { max-height: 442px; overflow-y: auto; padding: 0 13px 8px; }
+.job-card { padding: 13px 0; border-bottom: 1px solid color-mix(in srgb,var(--line) 72%,transparent); background: transparent; }
+.job-card:last-child { border-bottom:0; }
 .job-meta { margin-top: 4px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 .job-current { margin-top:3px; overflow:hidden; color:var(--ink-soft); font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
 .item-list { margin-top: 9px; max-height: 230px; overflow-y: auto; }
 .item-row { display: flex; align-items: flex-start; gap: 7px; padding: 7px 0; font-size: 11px; border-top: 1px solid rgba(122,125,117,.12); }
 .item-error { margin-top: 2px; color: var(--vermilion); overflow-wrap: anywhere; }
 .item-phase { margin-top: 2px; color: var(--muted); }
-.task-pill { position: fixed; right: 20px; bottom: 20px; z-index: 60; display: flex; align-items: center; gap: 8px; padding: 9px 11px; border: 1px solid rgba(122,125,117,.22); border-radius: 12px; background: color-mix(in srgb, var(--task-bg, #f7f5ef) 90%, transparent); color: inherit; box-shadow: 0 10px 32px rgba(20,24,22,.14); backdrop-filter: blur(18px); font-size: 12px; }
+.task-pill { position: fixed; right: 20px; bottom: 20px; z-index: 60; display: flex; min-height:36px; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--line); border-radius: var(--control-radius); background: color-mix(in srgb, var(--task-bg, #f7f5ef) 90%, transparent); color: inherit; box-shadow: 0 10px 28px rgba(20,24,22,.12); backdrop-filter: blur(18px); font-size: 12px; cursor:pointer; }
 .task-center-enter-active,.task-center-leave-active { transition: opacity .16s ease, transform .16s ease; }
 .task-center-enter-from,.task-center-leave-to { opacity: 0; transform: translateY(8px); }
 </style>

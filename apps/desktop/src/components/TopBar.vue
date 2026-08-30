@@ -87,7 +87,7 @@ async function onSync() {
 <template>
   <header class="top-bar glass-bar">
     <!-- 左侧：Logo + 分割线 + Tab 导航 -->
-    <div class="flex items-center gap-6">
+    <div class="top-bar-start">
       <!-- Logo 区域 -->
       <div class="flex items-center gap-3">
         <div class="app-mark w-8 h-8 rounded-lg flex items-center justify-center">
@@ -103,29 +103,30 @@ async function onSync() {
       </div>
 
       <!-- 竖线分割 -->
-      <div class="w-px h-5 bg-slate-200 dark:bg-neutral-700 mx-1" />
+      <span class="top-divider" aria-hidden="true" />
 
-      <!-- Tab：design/ui_demo 扁平分段；segment-pill-btn 去掉 WebView 默认灰底 -->
-      <div class="flex items-center bg-slate-100/80 dark:bg-neutral-900/55 p-1 rounded-lg">
+      <nav class="top-nav" aria-label="主要页面">
         <button
           type="button"
-          class="segment-pill-btn nav-tab flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium cursor-pointer border-0"
+          class="ui-tab top-nav-item"
           :class="{ active: ui.activeTab === 'sessions' }"
+          :aria-current="ui.activeTab === 'sessions' ? 'page' : undefined"
           @click="onTabChange('sessions')"
         >
-          <span class="i-lucide-messages-square w-4 h-4" />
+          <span class="i-lucide-messages-square top-nav-icon" aria-hidden="true" />
           对话档案
         </button>
         <button
           type="button"
-          class="segment-pill-btn nav-tab flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium cursor-pointer border-0"
+          class="ui-tab top-nav-item"
           :class="{ active: ui.activeTab === 'library' }"
+          :aria-current="ui.activeTab === 'library' ? 'page' : undefined"
           @click="onTabChange('library')"
         >
-          <span class="i-lucide-library w-4 h-4" />
+          <span class="i-lucide-library top-nav-icon" aria-hidden="true" />
           知识笔记
         </button>
-      </div>
+      </nav>
     </div>
 
     <!-- 右侧：同步 + 工具按钮 -->
@@ -138,7 +139,7 @@ async function onSync() {
       <n-button
         size="small"
         secondary
-        class="rounded-md"
+        class="sync-button"
         :loading="syncing"
         :disabled="syncing"
         @click="onSync"
@@ -149,7 +150,7 @@ async function onSync() {
         </span>
       </n-button>
 
-      <div class="w-px h-4 bg-slate-200 dark:bg-neutral-700 mx-1" />
+      <span class="toolbar-divider" aria-hidden="true" />
 
       <n-dropdown
         trigger="click"
@@ -200,17 +201,25 @@ async function onSync() {
 </template>
 
 <style scoped>
-.top-bar { display:flex; align-items:center; justify-content:space-between; height:68px; padding:0 22px; flex-shrink:0; border-bottom:1px solid var(--line); z-index:50; }
+.top-bar { display:flex; align-items:center; justify-content:space-between; height:64px; padding:0 22px; flex-shrink:0; border-bottom:1px solid var(--line); z-index:50; }
+.top-bar-start { display:flex; align-items:center; align-self:stretch; gap:20px; }
 .app-mark { background: var(--ink); color: var(--paper); }
 .app-version { background: color-mix(in srgb, var(--vermilion) 16%, transparent); color: var(--vermilion); }
 .product-name { display:flex; align-items:center; gap:6px; margin:0; color:var(--ink); font-family:var(--font-editorial); font-size:16px; font-weight:600; line-height:1.2; letter-spacing:.08em; }
 .product-tagline { color:var(--muted); font-size:9px; font-weight:500; line-height:1.3; letter-spacing:.12em; }
-.nav-tab { position: relative; color: var(--muted); transition: color .14s ease, background .14s ease; }
-.nav-tab:hover { color: var(--ink); }
-.nav-tab:focus-visible { outline:2px solid var(--pine); outline-offset:2px; }
-.nav-tab.active { color: var(--ink); background: color-mix(in srgb, var(--paper-raised) 82%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 72%, transparent); }
-.nav-tab.active::after { content: ''; position: absolute; left: 16px; right: 16px; bottom: -5px; height: 2px; border-radius: 2px; background: var(--vermilion); }
+.top-divider,.toolbar-divider { width:1px; background:var(--line); }
+.top-divider { height:24px; }
+.toolbar-divider { height:18px; margin:0 4px; }
+.top-nav { display:flex; align-items:stretch; align-self:stretch; gap:2px; }
+.top-nav-item { position:relative; display:flex; align-items:center; gap:8px; min-width:122px; padding:0 15px; background:transparent; color:var(--muted); font-size:13px; font-weight:500; letter-spacing:.01em; cursor:pointer; transition:color .18s var(--ease-out), background-color .18s var(--ease-out); }
+.top-nav-item:hover { color:var(--ink); background:color-mix(in srgb,var(--surface) 44%,transparent); }
+.top-nav-item.active { color:var(--ink); }
+.top-nav-item.active::after { content:''; position:absolute; right:15px; bottom:-1px; left:15px; height:2px; background:var(--vermilion); }
+.top-nav-icon { width:16px; height:16px; color:currentColor; opacity:.82; }
+.top-nav-item.active .top-nav-icon { color:var(--pine); opacity:1; }
+.sync-button { min-width:70px; }
 .top-progress { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:10px; }
 .top-progress-track { width:48px; height:2px; overflow:hidden; background:var(--line); }
 .top-progress-track i { display:block; height:100%; background:var(--pine); transition:width .16s linear; }
+@media (max-width:1000px) { .product-tagline,.app-version { display:none; } .top-bar-start { gap:12px; } .top-nav-item { min-width:auto; padding:0 12px; } }
 </style>

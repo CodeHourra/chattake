@@ -445,6 +445,7 @@ watch(() => ui.activeTab, (tab) => {
             :class="isAllMode
               ? 'all-active'
               : 'text-slate-700 dark:text-neutral-300 hover:bg-slate-100 dark:hover:bg-neutral-900'"
+            :aria-pressed="isAllMode"
             @click="selectAll"
           >
             <span class="i-lucide-messages-square w-4 h-4 shrink-0" />
@@ -541,15 +542,15 @@ watch(() => ui.activeTab, (tab) => {
       <!-- ============== 知识库模式 ============== -->
       <template v-else>
         <!-- 不单独 overflow：与外层 aside 共用一个滚动条，避免类型/标签/技术栈多重竖条 -->
-        <div class="p-4 pb-6 space-y-6">
+        <div class="library-filter-panel">
           <!-- 有筛选时提供一键重置，避免类型/标签/技术栈分散清除 -->
           <div
             v-if="filters.hasLibraryFilters"
-            class="flex items-center justify-between gap-2 rounded-lg border border-slate-200 dark:border-neutral-800 bg-slate-50/80 dark:bg-neutral-900/50 px-2.5 py-2"
+            class="filter-summary"
           >
-            <span class="text-[11px] text-slate-500 dark:text-neutral-400 leading-snug">已应用筛选</span>
-            <n-button size="tiny" secondary class="shrink-0" @click="filters.resetLibrary()">
-              重置
+            <span>筛选已启用</span>
+            <n-button size="tiny" quaternary class="shrink-0" @click="filters.resetLibrary()">
+              清除
             </n-button>
           </div>
 
@@ -570,41 +571,32 @@ watch(() => ui.activeTab, (tab) => {
                   </span>
                   <span
                     v-if="filters.cardType"
-                    class="truncate text-[10px] font-medium text-emerald-600 dark:text-emerald-400 normal-case tracking-normal"
+                    class="truncate text-[10px] font-medium normal-case tracking-normal selected-count"
                   >
                     {{ getCardTypeLabel(filters.cardType) }}
                   </span>
                 </div>
               </template>
-              <p class="text-[10px] text-slate-400 dark:text-neutral-500 mb-2 leading-relaxed">
-                单选；点「全部」或已选类型可恢复不限类型。
-              </p>
-              <div class="flex flex-wrap gap-2">
+              <div class="filter-chip-list">
                 <button
                   type="button"
-                  :class="[
-                    'appearance-none bg-transparent px-2.5 py-1 rounded-full text-xs font-medium cursor-pointer transition-colors',
-                    !filters.cardType
-                      ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60'
-                      : 'text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-neutral-700 hover:bg-slate-50 dark:hover:bg-neutral-800',
-                  ]"
+                  class="filter-chip"
+                  :class="{ selected: !filters.cardType }"
+                  :aria-pressed="!filters.cardType"
                   @click="filters.cardType = ''"
                 >
-                  全部 <span class="opacity-60 ml-0.5 text-[10px]">{{ totalCards }}</span>
+                  <span>全部</span><small>{{ totalCards }}</small>
                 </button>
                 <button
                   v-for="t in sidebar.cardTypes"
                   :key="t.name"
                   type="button"
-                  :class="[
-                    'appearance-none bg-transparent px-2.5 py-1 rounded-full text-xs cursor-pointer transition-colors',
-                    filters.cardType === t.name
-                      ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60 font-medium'
-                      : 'text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-neutral-700 hover:bg-slate-50 dark:hover:bg-neutral-800',
-                  ]"
+                  class="filter-chip"
+                  :class="{ selected: filters.cardType === t.name }"
+                  :aria-pressed="filters.cardType === t.name"
                   @click="selectCardType(t.name)"
                 >
-                  {{ getCardTypeLabel(t.name) }} <span class="opacity-60 ml-0.5 text-[10px]">{{ t.count }}</span>
+                  <span>{{ getCardTypeLabel(t.name) }}</span><small>{{ t.count }}</small>
                 </button>
               </div>
             </n-collapse-item>
@@ -618,32 +610,26 @@ watch(() => ui.activeTab, (tab) => {
                   </span>
                   <span
                     v-if="filters.selectedTags.length"
-                    class="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 normal-case tracking-normal tabular-nums"
+                    class="text-[10px] font-medium normal-case tracking-normal tabular-nums selected-count"
                   >
                     {{ filters.selectedTags.length }} 项
                   </span>
                 </div>
               </template>
-              <p class="text-[10px] text-slate-400 dark:text-neutral-500 mb-2 leading-relaxed">
-                多选为「且」：笔记须同时包含所选标签。
-              </p>
               <div v-if="sidebar.tagsLoading" class="flex items-center justify-center py-4">
                 <n-spin size="small" />
               </div>
-              <div v-else-if="sidebar.tags.length" class="flex flex-wrap gap-1.5">
+              <div v-else-if="sidebar.tags.length" class="filter-chip-list">
                 <button
                   v-for="tag in sidebar.tags"
                   :key="tag.name"
                   type="button"
-                  :class="[
-                    'appearance-none bg-transparent px-2.5 py-1 rounded-full text-xs cursor-pointer transition-colors',
-                    filters.selectedTags.includes(tag.name)
-                      ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60 font-medium'
-                      : 'text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-neutral-700 hover:bg-slate-50 dark:hover:bg-neutral-800',
-                  ]"
+                  class="filter-chip"
+                  :class="{ selected: filters.selectedTags.includes(tag.name) }"
+                  :aria-pressed="filters.selectedTags.includes(tag.name)"
                   @click="toggleTag(tag.name)"
                 >
-                  {{ tag.name }} <span class="opacity-50 ml-0.5 text-[10px]">{{ tag.count }}</span>
+                  <span>{{ tag.name }}</span><small>{{ tag.count }}</small>
                 </button>
               </div>
               <n-empty v-else size="small" description="暂无标签" class="py-2" />
@@ -658,40 +644,29 @@ watch(() => ui.activeTab, (tab) => {
                   </span>
                   <span
                     v-if="filters.selectedTechStacks.length"
-                    class="text-[10px] font-medium text-sky-600 dark:text-sky-400 normal-case tracking-normal tabular-nums"
+                    class="text-[10px] font-medium normal-case tracking-normal tabular-nums selected-count"
                   >
                     {{ filters.selectedTechStacks.length }} 项
                   </span>
                 </div>
               </template>
-              <p class="text-[10px] text-slate-400 dark:text-neutral-500 mb-2 leading-relaxed">
-                多选为「且」：笔记的 tech_stack 须同时包含所选项（大小写不敏感）。
-              </p>
               <div v-if="sidebar.tagsLoading" class="flex items-center justify-center py-3">
                 <n-spin size="small" />
               </div>
-              <div v-else-if="sidebar.techStacks.length" class="flex flex-wrap gap-1.5">
+              <div v-else-if="sidebar.techStacks.length" class="filter-chip-list">
                 <button
                   v-for="row in sidebar.techStacks"
                   :key="row.name"
                   type="button"
-                  :class="[
-                    'appearance-none bg-transparent px-2.5 py-1 rounded-full text-xs cursor-pointer transition-colors',
-                    filters.selectedTechStacks.includes(row.name)
-                      ? 'bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800/60 font-medium'
-                      : 'text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-neutral-700 hover:bg-slate-50 dark:hover:bg-neutral-800',
-                  ]"
+                  class="filter-chip"
+                  :class="{ selected: filters.selectedTechStacks.includes(row.name) }"
+                  :aria-pressed="filters.selectedTechStacks.includes(row.name)"
                   @click="toggleTechStack(row.name)"
                 >
-                  {{ row.name }} <span class="opacity-50 ml-0.5 text-[10px]">{{ row.count }}</span>
+                  <span>{{ row.name }}</span><small>{{ row.count }}</small>
                 </button>
               </div>
-              <p v-else class="text-[11px] text-slate-400 dark:text-neutral-500 py-2 leading-relaxed">
-                暂无。需会话经提炼写入 tech_stack；排查终端
-                <code class="text-[10px] opacity-90">normalize: tech_stack</code>
-                与
-                <code class="text-[10px] opacity-90">创建卡片: … tech_stack列</code>
-              </p>
+              <p v-else class="filter-empty">提炼完成后，识别出的技术项会显示在这里。</p>
             </n-collapse-item>
           </n-collapse>
         </div>
@@ -731,6 +706,15 @@ watch(() => ui.activeTab, (tab) => {
   display: inline-block;
   flex-shrink: 0;
 }
+.library-filter-panel { display:flex; flex-direction:column; gap:18px; padding:16px 16px 24px; }
+.filter-summary { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:7px 4px 7px 10px; border-left:2px solid var(--vermilion); color:var(--muted); font-size:11px; }
+.filter-chip-list { display:flex; flex-wrap:wrap; gap:6px; }
+.filter-chip { display:inline-flex; align-items:center; gap:6px; min-height:28px; padding:0 9px; border:1px solid var(--line) !important; border-radius:7px; background:transparent; color:var(--ink-soft); font-size:11px; cursor:pointer; transition:border-color .16s var(--ease-out), background-color .16s var(--ease-out), color .16s var(--ease-out); }
+.filter-chip:hover { border-color:var(--line-strong) !important; background:color-mix(in srgb,var(--surface) 58%,transparent); color:var(--ink); }
+.filter-chip.selected { border-color:color-mix(in srgb,var(--pine) 42%,var(--line)) !important; background:color-mix(in srgb,var(--pine) 10%,transparent); color:var(--pine); font-weight:600; }
+.filter-chip small { color:var(--muted); font-size:10px; font-variant-numeric:tabular-nums; }
+.selected-count { color:var(--pine); }
+.filter-empty { margin:2px 0 0; color:var(--muted); font-size:11px; line-height:1.65; }
 
 /* 知识库折叠：面板内容随侧栏整体滚动，禁止 Naive 内部再出现滚动条 */
 .library-filters-collapse :deep(.n-collapse-item__content-wrapper) {
@@ -739,17 +723,14 @@ watch(() => ui.activeTab, (tab) => {
 .library-filters-collapse :deep(.n-collapse-item__content-inner) {
   overflow: visible !important;
   max-height: none !important;
-  padding-top: 0;
-  padding-bottom: 10px;
+  padding-top: 2px;
+  padding-bottom: 12px;
 }
 .library-filters-collapse :deep(.n-collapse-item__header) {
   padding-top: 6px;
   padding-bottom: 6px;
 }
 .library-filters-collapse :deep(.n-collapse-item:not(:first-child)) {
-  border-top: 1px solid rgb(241 245 249);
-}
-.dark .library-filters-collapse :deep(.n-collapse-item:not(:first-child)) {
-  border-top-color: rgb(38 38 38);
+  border-top: 1px solid var(--line);
 }
 </style>

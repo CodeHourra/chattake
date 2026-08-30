@@ -17,8 +17,24 @@ const themeOverrides = computed(() => ({
     primaryColor: ui.darkMode ? '#86aa9e' : '#31594f',
     primaryColorHover: ui.darkMode ? '#9bbcaf' : '#406f62',
     primaryColorPressed: ui.darkMode ? '#6e9286' : '#27493f',
-    borderRadius: '7px',
+    borderRadius: '8px',
     fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif',
+  },
+  Button: {
+    heightTiny: '28px',
+    heightSmall: '32px',
+    heightMedium: '36px',
+    borderRadiusTiny: '7px',
+    borderRadiusSmall: '8px',
+    borderRadiusMedium: '8px',
+    fontSizeTiny: '11px',
+    fontSizeSmall: '12px',
+    fontSizeMedium: '13px',
+  },
+  Input: {
+    heightSmall: '32px',
+    heightMedium: '38px',
+    borderRadius: '8px',
   },
 }))
 </script>
@@ -58,6 +74,11 @@ const themeOverrides = computed(() => ({
   --font-editorial: 'Songti SC', 'STSong', 'Noto Serif CJK SC', serif;
   --brand-500: var(--pine);
   --brand-600: #254339;
+  --control-height: 36px;
+  --control-height-sm: 32px;
+  --control-radius: 8px;
+  --panel-radius: 12px;
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
   color: var(--ink);
   background: var(--paper);
 }
@@ -143,5 +164,21 @@ button.segment-pill-btn {
   appearance: none;
   margin: 0;
   font: inherit;
+}
+
+button.ui-tab,
+button.ui-icon-toggle,
+button.filter-chip {
+  -webkit-appearance: none;
+  appearance: none;
+  border: 0;
+  font: inherit;
+}
+
+button.ui-tab:focus-visible,
+button.ui-icon-toggle:focus-visible,
+button.filter-chip:focus-visible {
+  outline: 2px solid var(--pine);
+  outline-offset: 2px;
 }
 </style>
