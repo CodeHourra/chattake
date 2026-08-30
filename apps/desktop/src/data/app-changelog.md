@@ -7,22 +7,22 @@
 ### 新增
 
 - **全新品牌**：产品正式更名为「有得 · ChatTake」，应用、数据目录、MCP、安装包和仓库标识同步更新，不保留旧名称兼容层。
-- **四来源采集**：正式支持 Claude Code、Cursor、Codex、CodeBuddy，启动时只扫描变化，不会自动消耗模型 Token。
-- **多 API 配置**：可保存 OpenAI、DeepSeek、Moonshot、智谱、硅基流动及自定义 OpenAI-compatible 配置；任务固定使用启动时选择的配置。
+- **六来源采集**：正式支持 Claude Code、Cursor、Codex、CodeBuddy、OMP、Pi，启动时只扫描变化，不会自动消耗模型 Token。
+- **API / CLI Provider**：可同时保存 OpenAI-compatible API 与 Claude Code、Codex、Cursor、OMP、Pi、CodeBuddy CLI 配置；任务固定使用启动时选择的配置。
 - **知识草稿**：高价值知识自动发布，中价值进入草稿；重新分析先生成草稿，不覆盖已有知识。
 - **持久任务中心**：显示真实阶段、文件/会话计数、供应商、模型、耗时和失败项，支持取消与切换配置重试。
 - **只读 MCP**：提供搜索、卡片详情、聚合项和来源对话四个工具，只暴露已发布知识。
 
 ### 重构与性能
 
-- 建立 Light/Dark 双主题与克制的液态玻璃视觉语言，补齐四类来源 Logo 和窄窗口布局。
+- 建立 Light/Dark 双主题与克制的液态玻璃视觉语言，以线性档案索引替代满屏卡片，补齐来源标识和窄窗口布局。
 - 知识固定为决策、排障、实现、解释、片段五类，主题与技术项改为可治理标签。
 - 使用文件指纹与内容哈希增量同步；会话列表改为单次聚合查询，对话按 100 条游标分页。
 - 搜索改为 FTS5 trigram，中英文子串与 2 字短词均可检索；生产 Chunk 最大值低于 500 KB。
 
 ### 不兼容调整
 
-- 删除 LLM CLI Provider、所有 `*-internal` 路径和旧分类/Memory/Skill 数据模型。
+- 删除所有 `*-internal` 路径和旧分类/Memory/Skill 数据模型。
 - 旧数据库会在可恢复备份成功后重建，备份位于 `~/.chattake/db/backups/`。
 
 ## 0.1.7（2026-03-26）

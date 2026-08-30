@@ -5,7 +5,7 @@
 
 ## 简介
 
-有得是一款本地优先的 AI 对话知识库。它增量采集 Claude Code、Cursor、Codex、CodeBuddy 的本地对话，经用户确认后提取原子知识，并提供草稿治理、全文检索和只读 MCP 回溯。
+有得是一款本地优先的 AI 对话知识库。它增量采集 Claude Code、Cursor、Codex、CodeBuddy、OMP、Pi 的本地对话，经用户确认后通过 API 或本地 CLI Provider 提取原子知识，并提供草稿治理、全文检索和只读 MCP 回溯。
 
 v0.2.0 采用固定的五类知识（决策、排障、实现、解释、片段）与开放标签，避免 AI 无限生成分类。高价值知识自动发布，中价值进入草稿，重新分析不会覆盖旧知识。
 
@@ -14,7 +14,7 @@ v0.2.0 采用固定的五类知识（决策、排障、实现、解释、片段�
 - **桌面框架**: Tauri 2.0
 - **前端**: Vue 3 + TypeScript + UnoCSS + Naive UI + Pinia
 - **后端**: Rust (rusqlite, serde, tokio)
-- **LLM Sidecar**: TypeScript + Bun (OpenAI-compatible API)
+- **LLM Sidecar**: TypeScript + Bun（OpenAI-compatible API / 本地 CLI）
 - **MCP Server**: 官方 TypeScript SDK v2 + Bun（只读 stdio）
 
 ## 项目结构
@@ -54,7 +54,7 @@ bun run build:debug
 
 ## 配置
 
-配置默认保存到 `~/.chattake/config.toml`。可同时保存 OpenAI、DeepSeek、Moonshot、智谱、硅基流动和自定义 OpenAI-compatible 配置，但每个分析任务只绑定启动时选择的一套配置，不自动跨供应商切换。完整示例见 [`docs/config.example.toml`](docs/config.example.toml)。
+配置默认保存到 `~/.chattake/config.toml`。可同时保存 OpenAI-compatible API 与 Claude Code、Codex、Cursor、OMP、Pi、CodeBuddy CLI 配置；每个分析任务只绑定启动时选择的一套 Provider，不自动切换。完整示例见 [`docs/config.example.toml`](docs/config.example.toml)。
 
 首次运行 v0.2.0 时，如果检测到旧 Schema，会先通过 SQLite `VACUUM INTO` 备份到 `~/.chattake/db/backups/`，备份成功后才重建数据库。
 
