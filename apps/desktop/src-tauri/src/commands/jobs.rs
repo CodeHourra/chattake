@@ -125,8 +125,8 @@ fn spawn_job(
                                 &config,
                                 &sidecar,
                                 &session_id,
+                                &phase_job_id,
                                 profile_id.as_deref(),
-                                false,
                                 Some(&on_phase),
                             )
                             .map(|_| ())

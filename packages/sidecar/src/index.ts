@@ -8,13 +8,19 @@
  * 可用方法：
  *   ping          → { status, provider?, model? }
  *   init          → 初始化 API Provider 配置
- *   judge_value   → 轻量价值判断
- *   distill_full  → 完整技术笔记提炼
+ *   preprocess        → 单次清理与 24k 轮次采样
+ *   judge_value       → 轻量价值判断
+ *   extract_knowledge → 1–3 个原子知识项
  */
 
 import { startRpcServer, type Handler } from './rpc'
 import {
-  handleInit, handleJudgeValue, handleDistillFull, handleListModels, handleTestProvider,
+  handleExtractKnowledge,
+  handleInit,
+  handleJudgeValue,
+  handleListModels,
+  handlePreprocess,
+  handleTestProvider,
 } from './distiller'
 
 const handlers: Record<string, Handler> = {
@@ -22,8 +28,9 @@ const handlers: Record<string, Handler> = {
   init: handleInit,
   list_models: handleListModels,
   test_provider: handleTestProvider,
+  preprocess: handlePreprocess,
   judge_value: handleJudgeValue,
-  distill_full: handleDistillFull,
+  extract_knowledge: handleExtractKnowledge,
 }
 
 startRpcServer(handlers)

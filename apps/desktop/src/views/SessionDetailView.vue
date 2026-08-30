@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
-import { NButton, NResult, NSpin, NTag, NTooltip, useMessage } from 'naive-ui'
+import { NButton, NInput, NModal, NResult, NSelect, NSpin, NTag, NTooltip, useDialog, useMessage } from 'naive-ui'
 import NoteCard from '../components/NoteCard.vue'
 import ChatReplay from '../components/ChatReplay.vue'
 import { useAnalysisQueueStore } from '../stores/analysisQueue'
@@ -18,6 +18,7 @@ const props = defineProps<{
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
+const dialog = useDialog()
 
 const queue = useAnalysisQueueStore()
 const { currentTask, tasks } = storeToRefs(queue)
@@ -30,6 +31,14 @@ const analyzeError = ref<string | null>(null)
 const loadError = ref<string | null>(null)
 const exportMdLoading = ref(false)
 const mode = ref<'note' | 'chat'>('note')
+const editOpen = ref(false)
+const editSaving = ref(false)
+const edit = ref({ title: '', cardType: 'explanation', summary: '', note: '', tags: '', technologies: '' })
+const typeOptions = [
+  { label: '决策', value: 'decision' }, { label: '排障', value: 'troubleshooting' },
+  { label: '实现', value: 'implementation' }, { label: '解释', value: 'explanation' },
+  { label: '片段', value: 'snippet' },
+]
 
 /** 当前会话是否正在执行 distill（队列头） */
 const analyzing = computed(
@@ -107,6 +116,56 @@ async function analyze() {
     analyzeError.value = appendDistillHint(error instanceof Error ? error.message : String(error))
     if (session.value) session.value.status = 'error'
   }
+}
+
+function openEdit() {
+  if (!card.value) return
+  edit.value = {
+    title: card.value.title,
+    cardType: card.value.type ?? 'explanation',
+    summary: card.value.summary ?? '',
+    note: card.value.note,
+    tags: card.value.tags.join('，'),
+    technologies: card.value.techStack.join('，'),
+  }
+  editOpen.value = true
+}
+
+function splitLabels(value: string) {
+  return value.split(/[,，]/).map((item) => item.trim()).filter(Boolean)
+}
+
+async function saveEdit() {
+  if (!card.value) return
+  editSaving.value = true
+  try {
+    card.value = await api.updateCard(card.value.id, {
+      title: edit.value.title,
+      cardType: edit.value.cardType,
+      summary: edit.value.summary,
+      note: edit.value.note,
+      tags: splitLabels(edit.value.tags),
+      technologies: splitLabels(edit.value.technologies),
+    })
+    editOpen.value = false
+    message.success('草稿已保存')
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : String(error))
+  } finally { editSaving.value = false }
+}
+
+function publish(replaceExisting: boolean) {
+  if (!card.value) return
+  const label = replaceExisting ? '替换同会话中未人工编辑的旧知识' : '与现有知识并存'
+  dialog.warning({
+    title: '发布草稿', content: `将发布此草稿，并${label}。人工编辑过的旧知识不会被自动删除。`,
+    positiveText: '确认发布', negativeText: '取消',
+    onPositiveClick: async () => {
+      if (!card.value) return
+      card.value = await api.publishCard(card.value.id, replaceExisting)
+      message.success('知识已发布')
+    },
+  })
 }
 
 // ────────────── 会话元数据展示 ──────────────
@@ -248,6 +307,21 @@ const valueColors: Record<string, string> = {
         </n-result>
 
         <template v-else-if="card">
+          <div class="mb-3 flex items-center justify-between gap-3 rounded-xl border border-neutral-200 dark:border-neutral-800 px-3 py-2">
+            <div class="flex items-center gap-2 text-sm">
+              <n-tag size="small" :type="card.publicationStatus === 'draft' ? 'warning' : 'success'">
+                {{ card.publicationStatus === 'draft' ? '待审草稿' : '已发布' }}
+              </n-tag>
+              <span v-if="card.isUserEdited" class="text-xs text-neutral-500">已人工编辑</span>
+            </div>
+            <div class="flex gap-2">
+              <n-button size="small" secondary @click="openEdit">编辑</n-button>
+              <template v-if="card.publicationStatus === 'draft'">
+                <n-button size="small" secondary @click="publish(false)">发布并存</n-button>
+                <n-button size="small" type="primary" @click="publish(true)">发布并替换</n-button>
+              </template>
+            </div>
+          </div>
           <div
             v-if="analyzeQueued && !analyzing"
             class="mb-4 flex items-center gap-3 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900/80 px-4 py-3"
@@ -296,6 +370,21 @@ const valueColors: Record<string, string> = {
               </div>
             </template>
           </NoteCard>
+
+          <n-modal v-model:show="editOpen" preset="card" title="编辑知识项" class="max-w-3xl" :mask-closable="false">
+            <div class="space-y-3">
+              <n-input v-model:value="edit.title" placeholder="标题" />
+              <n-select v-model:value="edit.cardType" :options="typeOptions" />
+              <n-input v-model:value="edit.summary" type="textarea" :rows="2" placeholder="摘要" />
+              <n-input v-model:value="edit.note" type="textarea" :rows="14" placeholder="Markdown 正文" />
+              <n-input v-model:value="edit.tags" placeholder="主题标签，逗号分隔，最多 3 个" />
+              <n-input v-model:value="edit.technologies" placeholder="技术项，逗号分隔，最多 5 个" />
+              <div class="flex justify-end gap-2">
+                <n-button @click="editOpen = false">取消</n-button>
+                <n-button type="primary" :loading="editSaving" @click="saveEdit">保存</n-button>
+              </div>
+            </div>
+          </n-modal>
         </template>
 
         <template v-else-if="session">

@@ -113,12 +113,14 @@ export interface Message {
 export interface Card {
   id: string
   sessionId: string
+  analysisRunId: string | null
   title: string
   type: string | null
   value: string | null
   summary: string | null
   note: string
   publicationStatus: 'draft' | 'published'
+  isUserEdited: boolean
   sourceName: string | null
   projectName: string | null
   promptTokens: number
@@ -199,8 +201,25 @@ export interface ListCardsParams {
   value?: string | null
   /** 技术栈名称列表，AND 语义（卡片 tech_stack 字段需同时包含所选项） */
   techStack?: string[] | null
+  publicationStatus?: 'draft' | 'published'
   page?: number
   pageSize?: number
+}
+
+export interface TagRecord {
+  id: string
+  name: string
+  normalizedName: string
+  kind: 'topic' | 'technology'
+}
+
+export interface CardUpdatePayload {
+  title: string
+  cardType: string
+  summary: string
+  note: string
+  tags: string[]
+  technologies: string[]
 }
 
 // ─── 配置相关类型（与 Rust AppConfigDto 对应） ───────────────────────────────

@@ -1,5 +1,5 @@
 use chrono::Utc;
-use rusqlite::{params, OptionalExtension, Row};
+use rusqlite::{params, OptionalExtension, Row, Transaction};
 use uuid::Uuid;
 
 use super::db::{Database, DbError, DbResult};
@@ -32,25 +32,84 @@ fn card_from_row(row: &Row<'_>) -> rusqlite::Result<Card> {
     Ok(Card {
         id: row.get(0)?,
         session_id: row.get(1)?,
-        title: row.get(2)?,
-        card_type: row.get(3)?,
-        value: row.get(4)?,
-        summary: row.get(5)?,
-        note: row.get(6)?,
-        publication_status: row.get(7)?,
-        source_name: row.get(8)?,
-        project_name: row.get(9)?,
-        prompt_tokens: row.get(10)?,
-        completion_tokens: row.get(11)?,
-        cost_yuan: row.get(12)?,
-        feedback: row.get(13)?,
-        created_at: row.get(14)?,
-        updated_at: row.get(15)?,
+        analysis_run_id: row.get(2)?,
+        title: row.get(3)?,
+        card_type: row.get(4)?,
+        value: row.get(5)?,
+        summary: row.get(6)?,
+        note: row.get(7)?,
+        publication_status: row.get(8)?,
+        is_user_edited: row.get::<_, i64>(9)? != 0,
+        source_name: row.get(10)?,
+        project_name: row.get(11)?,
+        prompt_tokens: row.get(12)?,
+        completion_tokens: row.get(13)?,
+        cost_yuan: row.get(14)?,
+        feedback: row.get(15)?,
+        created_at: row.get(16)?,
+        updated_at: row.get(17)?,
         tags: Vec::new(),
         tech_stack: Vec::new(),
-        source_session_external_id: row.get(16)?,
-        source_session_path: row.get(17)?,
+        source_session_external_id: row.get(18)?,
+        source_session_path: row.get(19)?,
     })
+}
+
+fn rebuild_card_fts(tx: &Transaction<'_>, card_id: &str) -> rusqlite::Result<()> {
+    let row = tx.query_row(
+        "SELECT rowid,title,summary,note FROM cards WHERE id=?1",
+        params![card_id],
+        |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        },
+    )?;
+    let labels = |kind: &str| -> rusqlite::Result<String> {
+        tx.query_row(
+            "SELECT COALESCE(GROUP_CONCAT(t.name, ','),'') FROM tags t JOIN card_tags ct ON ct.tag_id=t.id WHERE ct.card_id=?1 AND t.kind=?2",
+            params![card_id, kind],
+            |row| row.get(0),
+        )
+    };
+    tx.execute("DELETE FROM cards_fts WHERE rowid=?1", params![row.0])?;
+    tx.execute(
+        "INSERT INTO cards_fts(rowid,title,summary,note,tags,technologies) VALUES(?1,?2,?3,?4,?5,?6)",
+        params![row.0, row.1, row.2, row.3, labels("topic")?, labels("technology")?],
+    )?;
+    Ok(())
+}
+
+fn attach_labels(
+    tx: &Transaction<'_>,
+    card_id: &str,
+    kind: &str,
+    names: &[String],
+) -> rusqlite::Result<()> {
+    for name in names {
+        let display = name.trim();
+        let normalized = display.to_lowercase();
+        if normalized.is_empty() {
+            continue;
+        }
+        tx.execute(
+            "INSERT OR IGNORE INTO tags(id,name,normalized_name,kind) VALUES(?1,?2,?3,?4)",
+            params![Uuid::new_v4().to_string(), display, normalized, kind],
+        )?;
+        let tag_id: String = tx.query_row(
+            "SELECT id FROM tags WHERE kind=?1 AND normalized_name=?2",
+            params![kind, normalized],
+            |row| row.get(0),
+        )?;
+        tx.execute(
+            "INSERT OR IGNORE INTO card_tags(card_id,tag_id) VALUES(?1,?2)",
+            params![card_id, tag_id],
+        )?;
+    }
+    Ok(())
 }
 
 // ─────────────────────────── 动态筛选条件构建 ─────────────────────────
@@ -63,8 +122,15 @@ fn card_from_row(row: &Row<'_>) -> rusqlite::Result<Card> {
 
 /// 根据 CardFilters 构建 WHERE 子句和参数列表
 pub(super) fn build_card_where(filters: &CardFilters) -> (String, Vec<String>) {
-    let mut conds: Vec<String> = vec!["c.publication_status = 'published'".to_string()];
+    let mut conds: Vec<String> = vec!["c.publication_status = ?".to_string()];
     let mut params: Vec<String> = Vec::new();
+    params.push(
+        filters
+            .publication_status
+            .as_deref()
+            .unwrap_or("published")
+            .to_string(),
+    );
 
     if let Some(ref t) = filters.card_type {
         conds.push(r#"c."type" = ?"#.to_string());
@@ -135,30 +201,25 @@ impl Database {
         let now = Utc::now().to_rfc3339();
         let tags_joined = card.tags.join(",");
         let technologies_joined = card.tech_stack.join(",");
-        let publication_status = if card.value == Some("high") {
-            "published"
-        } else {
-            "draft"
-        };
-
         let mut conn = self.conn();
         let tx = conn.transaction()?;
 
         tx.execute(
             "INSERT INTO cards (
-                id, session_id, title, type, value, summary, note,
+                id, session_id, analysis_run_id, title, type, value, summary, note,
                 publication_status, source_name, project_name,
                 prompt_tokens, completion_tokens, cost_yuan, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 &id,
                 card.session_id,
+                card.analysis_run_id,
                 card.title,
                 card.card_type,
                 card.value,
                 card.summary,
                 card.note,
-                publication_status,
+                card.publication_status,
                 card.source_name,
                 card.project_name,
                 card.prompt_tokens,
@@ -169,48 +230,9 @@ impl Database {
             ],
         )?;
 
-        // 主题与技术项统一进入 tags，通过 kind 区分。
-        for (kind, names) in [("topic", card.tags), ("technology", card.tech_stack)] {
-            for tag_name in names {
-                let normalized = tag_name.trim().to_lowercase();
-                if normalized.is_empty() {
-                    continue;
-                }
-                let tag_id = Uuid::new_v4().to_string();
-                tx.execute(
-                "INSERT OR IGNORE INTO tags (id, name, normalized_name, kind) VALUES (?, ?, ?, ?)",
-                params![&tag_id, tag_name.trim(), &normalized, kind],
-            )?;
-                let resolved_id: String = tx.query_row(
-                    "SELECT id FROM tags WHERE kind = ? AND normalized_name = ?",
-                    params![kind, &normalized],
-                    |row| row.get(0),
-                )?;
-                tx.execute(
-                    "INSERT OR IGNORE INTO card_tags (card_id, tag_id) VALUES (?, ?)",
-                    params![&id, &resolved_id],
-                )?;
-            }
-        }
-
-        // 同步 FTS5 全文索引（独立表，手动写入）
-        // 取出刚插入行的 rowid，使 FTS 行与 cards 行对应
-        let rowid: i64 = tx.query_row(
-            "SELECT rowid FROM cards WHERE id = ?",
-            params![&id],
-            |row| row.get(0),
-        )?;
-        tx.execute(
-            "INSERT INTO cards_fts(rowid, title, summary, note, tags, technologies) VALUES (?, ?, ?, ?, ?, ?)",
-            params![
-                rowid,
-                card.title,
-                card.summary.unwrap_or_default(),
-                card.note,
-                &tags_joined,
-                &technologies_joined,
-            ],
-        )?;
+        attach_labels(&tx, &id, "topic", card.tags)?;
+        attach_labels(&tx, &id, "technology", card.tech_stack)?;
+        rebuild_card_fts(&tx, &id)?;
 
         tx.commit()?;
         log::info!(
@@ -229,8 +251,8 @@ impl Database {
         let conn = self.read_conn()?;
         let mut card = conn
             .query_row(
-                "SELECT c.id, c.session_id, c.title, c.type, c.value, c.summary, c.note, \
-                 c.publication_status, c.source_name, c.project_name, \
+                "SELECT c.id, c.session_id, c.analysis_run_id, c.title, c.type, c.value, c.summary, c.note, \
+                 c.publication_status, c.is_user_edited, c.source_name, c.project_name, \
                  c.prompt_tokens, c.completion_tokens, c.cost_yuan, c.feedback, \
                  c.created_at, c.updated_at, \
                  sess.external_session_id, COALESCE(sess.raw_path, sess.project_path) \
@@ -260,6 +282,148 @@ impl Database {
             }
         }
         Ok(card)
+    }
+
+    pub fn update_card(&self, id: &str, update: &CardUpdate<'_>) -> DbResult<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let changed = tx.execute(
+            "UPDATE cards SET title=?1,type=?2,summary=?3,note=?4,is_user_edited=1,updated_at=?5 WHERE id=?6",
+            params![update.title, update.card_type, update.summary, update.note, Utc::now().to_rfc3339(), id],
+        )?;
+        if changed == 0 {
+            return Err(DbError::NotFound(format!("card {id}")));
+        }
+        tx.execute("DELETE FROM card_tags WHERE card_id=?1", params![id])?;
+        attach_labels(&tx, id, "topic", update.tags)?;
+        attach_labels(&tx, id, "technology", update.technologies)?;
+        rebuild_card_fts(&tx, id)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn publish_card(&self, id: &str, replace_existing: bool) -> DbResult<()> {
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let session_id: String = tx
+            .query_row(
+                "SELECT session_id FROM cards WHERE id=?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or_else(|| DbError::NotFound(format!("card {id}")))?;
+        if replace_existing {
+            let mut stmt = tx.prepare(
+                "SELECT id,rowid FROM cards WHERE session_id=?1 AND id<>?2 AND publication_status='published' AND is_user_edited=0",
+            )?;
+            let old = stmt
+                .query_map(params![session_id, id], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(stmt);
+            for (old_id, rowid) in old {
+                tx.execute("DELETE FROM cards_fts WHERE rowid=?1", params![rowid])?;
+                tx.execute("DELETE FROM cards WHERE id=?1", params![old_id])?;
+            }
+        }
+        tx.execute(
+            "UPDATE cards SET publication_status='published',updated_at=?1 WHERE id=?2",
+            params![Utc::now().to_rfc3339(), id],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn list_tag_records(&self) -> DbResult<Vec<Tag>> {
+        let conn = self.read_conn()?;
+        let mut stmt =
+            conn.prepare("SELECT id,name,normalized_name,kind FROM tags ORDER BY kind,name")?;
+        let tags = stmt
+            .query_map([], |row| {
+                Ok(Tag {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    normalized_name: row.get(2)?,
+                    kind: row.get(3)?,
+                })
+            })?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(DbError::from)?;
+        Ok(tags)
+    }
+
+    pub fn merge_tags(&self, kind: &str, sources: &[String], target: &str) -> DbResult<()> {
+        if !matches!(kind, "topic" | "technology") || target.trim().is_empty() || sources.is_empty()
+        {
+            return Err(DbError::Invalid("标签类型、来源或目标无效".into()));
+        }
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        let target_name = target.trim();
+        let target_normalized = target_name.to_lowercase();
+        tx.execute(
+            "INSERT OR IGNORE INTO tags(id,name,normalized_name,kind) VALUES(?1,?2,?3,?4)",
+            params![
+                Uuid::new_v4().to_string(),
+                target_name,
+                target_normalized,
+                kind
+            ],
+        )?;
+        let target_id: String = tx.query_row(
+            "SELECT id FROM tags WHERE kind=?1 AND normalized_name=?2",
+            params![kind, target_normalized],
+            |row| row.get(0),
+        )?;
+        let normalized = sources
+            .iter()
+            .map(|name| name.trim().to_lowercase())
+            .collect::<Vec<_>>();
+        let placeholders = vec!["?"; normalized.len()].join(",");
+        let sql = format!(
+            "SELECT id FROM tags WHERE kind=? AND normalized_name IN ({placeholders}) AND id<>?"
+        );
+        let mut values = vec![kind.to_string()];
+        values.extend(normalized);
+        values.push(target_id.clone());
+        let mut stmt = tx.prepare(&sql)?;
+        let source_ids = stmt
+            .query_map(rusqlite::params_from_iter(values.iter()), |row| {
+                row.get::<_, String>(0)
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(stmt);
+        if source_ids.is_empty() {
+            return Ok(());
+        }
+        let source_placeholders = vec!["?"; source_ids.len()].join(",");
+        let affected_sql = format!(
+            "SELECT DISTINCT card_id FROM card_tags WHERE tag_id IN ({source_placeholders})"
+        );
+        let mut affected_stmt = tx.prepare(&affected_sql)?;
+        let affected = affected_stmt
+            .query_map(rusqlite::params_from_iter(source_ids.iter()), |row| {
+                row.get::<_, String>(0)
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        drop(affected_stmt);
+        for card_id in &affected {
+            tx.execute(
+                "INSERT OR IGNORE INTO card_tags(card_id,tag_id) VALUES(?1,?2)",
+                params![card_id, target_id],
+            )?;
+        }
+        let delete_links = format!("DELETE FROM card_tags WHERE tag_id IN ({source_placeholders})");
+        tx.execute(&delete_links, rusqlite::params_from_iter(source_ids.iter()))?;
+        let delete_tags = format!("DELETE FROM tags WHERE id IN ({source_placeholders})");
+        tx.execute(&delete_tags, rusqlite::params_from_iter(source_ids.iter()))?;
+        for card_id in &affected {
+            rebuild_card_fts(&tx, card_id)?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     /// 分页查询知识卡片列表，支持按类型/价值/标签筛选
@@ -470,14 +634,45 @@ mod tests {
             .unwrap();
         let topics = vec!["全文检索".to_string()];
         let technologies = vec!["SQLite".to_string(), "Rust".to_string()];
+        let job = db
+            .create_job(
+                "analysis",
+                "queued",
+                Some((
+                    "profile",
+                    "siliconflow",
+                    "https://api.siliconflow.cn/v1",
+                    "model",
+                )),
+                &[NewJobItem {
+                    session_id: Some(&session_id),
+                    source_id: None,
+                    raw_path: None,
+                }],
+            )
+            .unwrap();
+        let run_id = db
+            .create_analysis_run(
+                &job.id,
+                &session_id,
+                "profile",
+                "siliconflow",
+                "api.siliconflow.cn",
+                "model",
+                "hash",
+                "test",
+            )
+            .unwrap();
         let high_id = db
             .insert_card(&NewCard {
                 session_id: &session_id,
+                analysis_run_id: &run_id,
                 title: "SQLite FTS5 索引",
-                card_type: Some("implementation"),
-                value: Some("high"),
-                summary: Some("建立 trigram 索引"),
+                card_type: "implementation",
+                value: "high",
+                summary: "建立 trigram 索引",
                 note: "SQLite FTS5 trigram",
+                publication_status: "published",
                 source_name: Some("Codex"),
                 project_name: None,
                 prompt_tokens: 1,
@@ -490,11 +685,13 @@ mod tests {
         let draft_id = db
             .insert_card(&NewCard {
                 session_id: &session_id,
+                analysis_run_id: &run_id,
                 title: "草稿",
-                card_type: Some("explanation"),
-                value: Some("medium"),
-                summary: Some("待确认"),
+                card_type: "explanation",
+                value: "medium",
+                summary: "待确认",
                 note: "draft body",
+                publication_status: "draft",
                 source_name: Some("Codex"),
                 project_name: None,
                 prompt_tokens: 1,
@@ -521,6 +718,50 @@ mod tests {
                 .unwrap()
                 .len(),
             1
+        );
+
+        db.update_card(
+            &draft_id,
+            &CardUpdate {
+                title: "人工整理草稿",
+                card_type: "explanation",
+                summary: "已校订",
+                note: "manual SQLite note",
+                tags: &["数据库".into()],
+                technologies: &["SQLite".into()],
+            },
+        )
+        .unwrap();
+        assert!(db.get_card(&draft_id).unwrap().is_user_edited);
+        db.publish_card(&draft_id, false).unwrap();
+        db.merge_tags("topic", &["数据库".into(), "全文检索".into()], "数据检索")
+            .unwrap();
+        assert_eq!(db.get_card(&draft_id).unwrap().tags, vec!["数据检索"]);
+
+        let replacement = db
+            .insert_card(&NewCard {
+                session_id: &session_id,
+                analysis_run_id: &run_id,
+                title: "替换草稿",
+                card_type: "decision",
+                value: "high",
+                summary: "替换旧自动知识",
+                note: "replacement",
+                publication_status: "draft",
+                source_name: Some("Codex"),
+                project_name: None,
+                prompt_tokens: 1,
+                completion_tokens: 1,
+                cost_yuan: 0.0,
+                tags: &[],
+                tech_stack: &[],
+            })
+            .unwrap();
+        db.publish_card(&replacement, true).unwrap();
+        assert!(db.get_card(&high_id).is_err());
+        assert!(
+            db.get_card(&draft_id).is_ok(),
+            "人工编辑的旧知识不得自动删除"
         );
     }
 }

@@ -21,6 +21,8 @@ import type {
   SessionFilterPayload,
   SessionSummary,
   TagCount,
+  TagRecord,
+  CardUpdatePayload,
   TypeCount,
 } from '../types'
 
@@ -96,12 +98,20 @@ export const api = {
       cardType: params.cardType ?? null,
       value: params.value ?? null,
       techStack: params.techStack ?? null,
+      publicationStatus: params.publicationStatus ?? null,
       page: params.page ?? null,
       pageSize: params.pageSize ?? null,
     }),
 
   /** 获取单张卡片（含 tags） */
   getCard: (id: string) => invoke<Card>('get_card', { id }),
+  updateCard: (id: string, payload: CardUpdatePayload) =>
+    invoke<Card>('update_card', { id, ...payload }),
+  publishCard: (id: string, replaceExisting: boolean) =>
+    invoke<Card>('publish_card', { id, replaceExisting }),
+  listTagRecords: () => invoke<TagRecord[]>('list_tag_records'),
+  mergeTags: (kind: TagRecord['kind'], sources: string[], target: string) =>
+    invoke<void>('merge_tags', { kind, sources, target }),
 
   /** 获取会话分组统计（侧栏目录树） */
   getSessionGroups: () => invoke<SessionGroupCount[]>('get_session_groups'),

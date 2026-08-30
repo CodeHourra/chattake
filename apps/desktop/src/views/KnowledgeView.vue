@@ -12,14 +12,18 @@ import {
   NTag,
   NCheckbox,
   NButton,
+  NInput,
+  NModal,
+  NSelect,
   useMessage,
   useDialog,
 } from 'naive-ui'
 import { getCardTypeLabel } from '@xunji/shared'
 import { api } from '../lib/tauri'
 import { exportAllCardsToDir, exportSelectedCards } from '../lib/cardExport'
-import type { CardSummary } from '../types'
+import type { CardSummary, TagRecord } from '../types'
 import { useFiltersStore } from '../stores/filters'
+import { useSidebarStore } from '../stores/sidebar'
 import Pagination from '../components/Pagination.vue'
 
 const VIEW_MODE_KEY = 'xunji:knowledgeViewMode'
@@ -29,6 +33,7 @@ const router = useRouter()
 const message = useMessage()
 const dialog = useDialog()
 const filters = useFiltersStore()
+const sidebar = useSidebarStore()
 const items = ref<CardSummary[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -39,6 +44,12 @@ const selectedIds = ref(new Set<string>())
 const exportBusy = ref(false)
 
 const viewMode = ref<ViewMode>('card')
+const publicationStatus = ref<'published' | 'draft'>('published')
+const tagManagerOpen = ref(false)
+const tagRecords = ref<TagRecord[]>([])
+const tagKind = ref<'topic' | 'technology'>('topic')
+const tagSources = ref<string[]>([])
+const tagTarget = ref('')
 
 const selectedCount = computed(() => selectedIds.value.size)
 
@@ -53,6 +64,7 @@ async function load() {
       cardType: filters.cardType || undefined,
       tags: filters.selectedTags.length ? [...filters.selectedTags] : undefined,
       techStack: filters.selectedTechStacks.length ? [...filters.selectedTechStacks] : undefined,
+      publicationStatus: publicationStatus.value,
       page: page.value,
       pageSize: pageSize.value,
     })
@@ -63,6 +75,28 @@ async function load() {
   }
 }
 
+async function openTagManager() {
+  tagRecords.value = await api.listTagRecords()
+  tagSources.value = []
+  tagTarget.value = ''
+  tagManagerOpen.value = true
+}
+
+const tagOptions = computed(() => tagRecords.value
+  .filter((tag) => tag.kind === tagKind.value)
+  .map((tag) => ({ label: tag.name, value: tag.name })))
+
+async function mergeSelectedTags() {
+  try {
+    await api.mergeTags(tagKind.value, tagSources.value, tagTarget.value)
+    await Promise.all([sidebar.loadLibraryMeta(), load()])
+    tagRecords.value = await api.listTagRecords()
+    tagSources.value = []
+    tagTarget.value = ''
+    message.success('标签已合并并重建检索索引')
+  } catch (error) { message.error(error instanceof Error ? error.message : String(error)) }
+}
+
 onMounted(() => {
   const raw = localStorage.getItem(VIEW_MODE_KEY)
   if (raw === 'list' || raw === 'card') viewMode.value = raw
@@ -71,6 +105,7 @@ onMounted(() => {
 
 watch(
   [
+    () => publicationStatus.value,
     () => filters.cardType,
     () => filters.selectedTags.length,
     () => filters.selectedTechStacks.length,
@@ -193,7 +228,20 @@ function onExportAll() {
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2 justify-end">
+        <div class="bg-slate-100/80 dark:bg-neutral-900/55 p-1 rounded-lg inline-flex">
+          <button
+            v-for="option in [{ value: 'published', label: '已发布' }, { value: 'draft', label: '待审草稿' }] as const"
+            :key="option.value"
+            type="button"
+            class="segment-pill-btn px-3 py-1 rounded-md text-sm border-0"
+            :class="publicationStatus === option.value ? 'bg-white dark:bg-neutral-800 text-slate-900 dark:text-white' : 'bg-transparent text-slate-500'"
+            @click="publicationStatus = option.value"
+          >
+            {{ option.label }}
+          </button>
+        </div>
         <div class="flex flex-wrap gap-1.5 items-center">
+          <n-button size="small" secondary @click="openTagManager">标签治理</n-button>
           <span v-if="selectedCount" class="text-[11px] text-slate-500 dark:text-slate-400">已选 {{ selectedCount }} 条</span>
           <n-button size="small" secondary :disabled="!items.length" @click="selectAllOnPage">
             全选当页
@@ -341,6 +389,7 @@ function onExportAll() {
                 >
                   {{ c.value === 'high' ? '高价值' : c.value === 'medium' ? '中价值' : c.value }}
                 </n-tag>
+                <n-tag v-if="c.publicationStatus === 'draft'" size="small" :bordered="false" type="warning">草稿</n-tag>
               </div>
               <div class="shrink-0" @click.stop>
                 <n-checkbox
@@ -476,5 +525,17 @@ function onExportAll() {
         @update:page-size="setPageSize"
       />
     </footer>
+
+    <n-modal v-model:show="tagManagerOpen" preset="card" title="标签治理" class="max-w-lg">
+      <div class="space-y-3">
+        <n-select v-model:value="tagKind" :options="[{ label: '主题标签', value: 'topic' }, { label: '技术项', value: 'technology' }]" />
+        <n-select v-model:value="tagSources" multiple filterable :options="tagOptions" placeholder="选择要重命名或合并的标签" />
+        <n-input v-model:value="tagTarget" placeholder="目标名称；选择一个来源即可完成重命名" />
+        <div class="flex justify-end gap-2">
+          <n-button @click="tagManagerOpen = false">关闭</n-button>
+          <n-button type="primary" :disabled="!tagSources.length || !tagTarget.trim()" @click="mergeSelectedTags">合并</n-button>
+        </div>
+      </div>
+    </n-modal>
   </div>
 </template>

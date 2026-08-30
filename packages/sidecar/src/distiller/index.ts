@@ -7,8 +7,8 @@
 
 import { createHash } from 'node:crypto'
 
-import { clean, truncate } from './preprocessor'
-import { PROMPT_B_LIGHT, PROMPT_B_FULL } from './prompts'
+import { preprocess } from './preprocessor'
+import { PROMPT_EXTRACT_KNOWLEDGE, PROMPT_JUDGE_VALUE } from './prompts'
 import { ApiProvider, listApiModels, type ApiProviderConfig, type DistillResult } from './api-provider'
 import { normalizeLlmTags, normalizeLlmTechStack } from './tech-tags'
 import { distillLog, resolveTraceId } from './trace'
@@ -25,24 +25,23 @@ interface Provider {
 
 let provider: Provider | null = null
 
-/** LLM 提炼结果类型定义（完整版） */
-export interface DistillFullResult {
+export interface KnowledgeItem {
   title: string
   type: string
-  value: string
-  value_reason?: string
   summary: string
   note: string
-  tags: string[]
-  tech_stack: string[]
+  topic_tags: string[]
+  technologies: string[]
+}
+
+export interface ExtractKnowledgeResult {
+  items: KnowledgeItem[]
   prompt_tokens: number
   completion_tokens: number
 }
 
-/** 价值判断结果类型定义（轻量版） */
 export interface JudgeValueResult {
   value: string
-  type: string
   reason: string
   prompt_tokens: number
   completion_tokens: number
@@ -61,14 +60,6 @@ function getProvider(): Provider {
     throw new Error('Distiller 未初始化，请先调用 init 方法配置 API')
   }
   return provider
-}
-
-/**
- * 对对话内容做前处理（清理 + 截断）
- */
-function preprocess(content: string): string {
-  const cleaned = clean(content)
-  return truncate(cleaned)
 }
 
 /**
@@ -257,76 +248,20 @@ function extractJson(text: string, traceId: string): unknown {
   )
 }
 
-/**
- * 将 LLM 返回的「完整提炼」JSON 规范化为 DistillFullResult 所需字段。
- *
- * 说明：不少模型会输出 camelCase（如 techStack），而协议与 Rust 侧约定为 snake_case（tech_stack）。
- * 若不做归一化，Rust 反序列化时 tech_stack 会落默认空数组，前端笔记头就永远没有技术栈。
- */
-function normalizeDistillFullParsed(
-  raw: Record<string, unknown>,
-  traceId: string,
-): {
-  title: string
-  type: string
-  value: string
-  value_reason?: string
-  summary: string
-  note: string
-  tags: string[]
-  tech_stack: string[]
-} {
-  const tags = normalizeLlmTags(raw.tags)
-  // tech_stack / techStack 二选一（及少数模型用大写键的兜底）
-  const tech_stack = normalizeLlmTechStack(
-    raw.tech_stack ?? raw.techStack ?? raw['TechStack'],
-  )
-
-  console.error(
-    distillLog(
-      traceId,
-      `normalize: LLM JSON 顶层键: ${Object.keys(raw).join(', ')}`,
-    ),
-  )
-  console.error(
-    distillLog(
-      traceId,
-      `normalize: tech 相关原始值 tech_stack=${JSON.stringify(raw.tech_stack)} techStack=${JSON.stringify(raw.techStack)} TechStack=${JSON.stringify(raw['TechStack'])}`,
-    ),
-  )
-  console.error(
-    distillLog(
-      traceId,
-      `normalize: 标签 归一化后共 ${tags.length} 项（已限 5、去重）: ${JSON.stringify(tags)}`,
-    ),
-  )
-  console.error(
-    distillLog(
-      traceId,
-      `normalize: tech_stack 归一化后共 ${tech_stack.length} 项（已限 8、去重）: ${JSON.stringify(tech_stack)}`,
-    ),
-  )
-
-  return {
-    title: typeof raw.title === 'string' ? raw.title : '',
-    type: typeof raw.type === 'string' ? raw.type : 'other',
-    value: typeof raw.value === 'string' ? raw.value : 'medium',
-    value_reason:
-      typeof raw.value_reason === 'string' ? raw.value_reason : undefined,
-    summary: typeof raw.summary === 'string' ? raw.summary : '',
-    note: typeof raw.note === 'string' ? raw.note : '',
-    tags,
-    tech_stack,
-  }
-}
-
 // ── JSON-RPC Handlers ──
 
-/**
- * judge_value handler —— 轻量价值判断。
- * 输入：{ content: string }
- * 输出：{ value, type, reason, prompt_tokens, completion_tokens }
- */
+export async function handlePreprocess(
+  params: Record<string, unknown>,
+): Promise<{ content: string }> {
+  if (typeof params.content !== 'string' || !params.content.trim()) {
+    throw new Error('参数缺失或类型错误: content 必须为非空字符串')
+  }
+  const traceId = resolveTraceId(params)
+  const processed = preprocess(params.content)
+  logContentPreview('preprocess', params.content.length, processed, traceId)
+  return { content: processed }
+}
+
 export async function handleJudgeValue(
   params: Record<string, unknown>,
 ): Promise<JudgeValueResult> {
@@ -337,10 +272,7 @@ export async function handleJudgeValue(
   const content = params.content
 
   const p = getProvider()
-  const processed = preprocess(content)
-  logContentPreview('judge_value', content.length, processed, traceId)
-
-  const result = await p.distill(PROMPT_B_LIGHT, processed, 'judge_value', traceId)
+  const result = await p.distill(PROMPT_JUDGE_VALUE, content, 'judge_value', traceId)
   console.error(
     distillLog(
       traceId,
@@ -348,33 +280,25 @@ export async function handleJudgeValue(
     ),
   )
 
-  const parsed = extractJson(result.content, traceId) as {
-    value: string
-    type: string
-    reason: string
+  const parsed = extractJson(result.content, traceId) as Record<string, unknown>
+  const value = typeof parsed.value === 'string' ? parsed.value.toLowerCase() : ''
+  const reason = typeof parsed.reason === 'string' ? parsed.reason.trim() : ''
+  if (!['high', 'medium', 'low', 'none'].includes(value) || !reason) {
+    throw new Error('响应格式错误: judge_value 需要有效的 value 与 reason')
   }
-  console.error(
-    distillLog(
-      traceId,
-      `judge_value 结果: value=${parsed.value}, type=${parsed.type}`,
-    ),
-  )
+  console.error(distillLog(traceId, `judge_value 结果: value=${value}`))
 
   return {
-    ...parsed,
+    value,
+    reason,
     prompt_tokens: result.promptTokens,
     completion_tokens: result.completionTokens,
   }
 }
 
-/**
- * distill_full handler —— 完整技术笔记提炼。
- * 输入：{ content: string }
- * 输出：{ title, type, value, summary, note, tags, tech_stack, prompt_tokens, completion_tokens }
- */
-export async function handleDistillFull(
+export async function handleExtractKnowledge(
   params: Record<string, unknown>,
-): Promise<DistillFullResult> {
+): Promise<ExtractKnowledgeResult> {
   if (typeof params.content !== 'string' || !params.content.trim()) {
     throw new Error('参数缺失或类型错误: content 必须为非空字符串')
   }
@@ -382,28 +306,35 @@ export async function handleDistillFull(
   const content = params.content
 
   const p = getProvider()
-  const processed = preprocess(content)
-  logContentPreview('distill_full', content.length, processed, traceId)
-
-  const result = await p.distill(PROMPT_B_FULL, processed, 'distill_full', traceId)
+  const result = await p.distill(PROMPT_EXTRACT_KNOWLEDGE, content, 'extract_knowledge', traceId)
   console.error(
     distillLog(
       traceId,
-      `distill_full: LLM 响应 ${result.content.length} 字符，tokens: in=${result.promptTokens} out=${result.completionTokens}`,
+      `extract_knowledge: LLM 响应 ${result.content.length} 字符，tokens: in=${result.promptTokens} out=${result.completionTokens}`,
     ),
   )
 
-  const rawObj = extractJson(result.content, traceId) as Record<string, unknown>
-  const parsed = normalizeDistillFullParsed(rawObj, traceId)
-  console.error(
-    distillLog(
-      traceId,
-      `distill_full 结果: value=${parsed.value}, type=${parsed.type}, title="${parsed.title}", tech_stack=${JSON.stringify(parsed.tech_stack)}`,
-    ),
-  )
+  const raw = extractJson(result.content, traceId) as Record<string, unknown>
+  const allowedTypes = new Set(['decision', 'troubleshooting', 'implementation', 'explanation', 'snippet'])
+  const items = (Array.isArray(raw.items) ? raw.items : [])
+    .slice(0, 3)
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+    .map((item) => ({
+      title: typeof item.title === 'string' ? item.title.trim() : '',
+      type: typeof item.type === 'string' && allowedTypes.has(item.type) ? item.type : '',
+      summary: typeof item.summary === 'string' ? item.summary.trim() : '',
+      note: typeof item.note === 'string' ? item.note.trim() : '',
+      topic_tags: normalizeLlmTags(item.topic_tags ?? item.topicTags),
+      technologies: normalizeLlmTechStack(item.technologies ?? item.tech_stack ?? item.techStack),
+    }))
+    .filter((item) => item.title && item.type && item.summary && item.note)
+  if (items.length < 1) {
+    throw new Error('响应格式错误: extract_knowledge 需要 1–3 个完整知识项')
+  }
+  console.error(distillLog(traceId, `extract_knowledge 结果: items=${items.length}`))
 
   return {
-    ...parsed,
+    items,
     prompt_tokens: result.promptTokens,
     completion_tokens: result.completionTokens,
   }

@@ -10,6 +10,7 @@
 //! search.rs       FTS5 全文搜索
 //! ```
 
+mod analysis;
 mod cards;
 pub mod db;
 mod jobs;

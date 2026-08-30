@@ -131,6 +131,7 @@ pub struct Card {
     pub id: String,
     /// 来源会话的数据库主键
     pub session_id: String,
+    pub analysis_run_id: Option<String>,
     /// 卡片标题（LLM 生成）
     pub title: String,
     /// 知识类型: debug | architecture | performance | best-practice | concept | tool-usage | refactor | other
@@ -144,6 +145,7 @@ pub struct Card {
     pub note: String,
     /// draft | published
     pub publication_status: String,
+    pub is_user_edited: bool,
     /// 来源数据源名称（冗余存储，方便展示）
     pub source_name: Option<String>,
     /// 来源项目名称（冗余存储，方便展示）
@@ -209,14 +211,16 @@ pub struct Tag {
 /// 创建知识卡片的入参
 pub struct NewCard<'a> {
     pub session_id: &'a str,
+    pub analysis_run_id: &'a str,
     pub title: &'a str,
     /// 知识类型: decision | troubleshooting | implementation | explanation | snippet
-    pub card_type: Option<&'a str>,
+    pub card_type: &'a str,
     /// 产出卡片时仅为 high | medium
-    pub value: Option<&'a str>,
-    pub summary: Option<&'a str>,
+    pub value: &'a str,
+    pub summary: &'a str,
     /// Markdown 格式技术笔记
     pub note: &'a str,
+    pub publication_status: &'a str,
     pub source_name: Option<&'a str>,
     pub project_name: Option<&'a str>,
     pub prompt_tokens: i32,
@@ -352,6 +356,8 @@ pub struct NewJobItem<'a> {
 /// 知识卡片筛选条件
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CardFilters {
+    /// 默认只看 published；草稿中心显式传 draft。
+    pub publication_status: Option<String>,
     /// 按标签名称筛选（AND 语义，需同时匹配所有标签）
     pub tags: Option<Vec<String>>,
     /// 按知识类型筛选
@@ -362,4 +368,13 @@ pub struct CardFilters {
     pub search: Option<String>,
     /// 按 tags.kind=technology 筛选（AND 语义）
     pub tech_stack: Option<Vec<String>>,
+}
+
+pub struct CardUpdate<'a> {
+    pub title: &'a str,
+    pub card_type: &'a str,
+    pub summary: &'a str,
+    pub note: &'a str,
+    pub tags: &'a [String],
+    pub technologies: &'a [String],
 }

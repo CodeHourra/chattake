@@ -13,12 +13,13 @@
 //! 自动映射到 Rust snake_case 参数，无需 `args` 包装结构体。
 
 use tauri::State;
+use url::Url;
 use uuid::Uuid;
 
 use crate::config::AppConfig;
 use crate::sidecar::SidecarManager;
 use crate::storage::models::{
-    Card, Message, NewCard, PaginatedResult, Session, SessionFilters, SessionSummary,
+    Message, NewCard, PaginatedResult, Session, SessionFilters, SessionSummary,
 };
 use crate::storage::Database;
 use crate::AppState;
@@ -40,30 +41,32 @@ fn validate_session_filter_groups(groups: &[SessionFilters]) -> Result<(), Strin
 #[derive(Debug, serde::Deserialize)]
 struct JudgeValueResult {
     value: String,
-    #[serde(rename = "type")]
-    card_type: String,
-    /// 低/无价值时的原因（也用于构造标题和摘要）
     reason: String,
-    #[allow(dead_code)]
     prompt_tokens: i64,
-    #[allow(dead_code)]
     completion_tokens: i64,
 }
 
-/// Sidecar `distill_full` 返回结构
 #[derive(Debug, serde::Deserialize)]
-struct DistillFullResult {
+struct PreprocessResult {
+    content: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct KnowledgeItem {
     title: String,
     #[serde(rename = "type")]
     card_type: String,
-    value: String,
     summary: String,
     note: String,
     #[serde(default)]
-    tags: Vec<String>,
-    /// 与 prompt 约定为 snake_case；兼容少数模型输出 camelCase `techStack`
+    topic_tags: Vec<String>,
     #[serde(default, alias = "techStack")]
-    tech_stack: Vec<String>,
+    technologies: Vec<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct ExtractKnowledgeResult {
+    items: Vec<KnowledgeItem>,
     prompt_tokens: i64,
     completion_tokens: i64,
 }
@@ -155,48 +158,18 @@ pub async fn get_session_messages(
     .map_err(|e| format!("get_session_messages join 失败: {}", e))?
 }
 
-/// `distill_session` 返回结果
-///
-/// ```text
-/// is_low_value = true  → low / none，DB 已记录价值，无 Card 产出
-/// is_low_value = false → medium / high，Card 已写库
-/// ```
-#[derive(Debug, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DistillSessionResult {
-    /// 本次提炼流水线 id，与 sidecar / API 日志中的 traceId 一致，便于串联排查（如 tech_stack）
-    pub trace_id: String,
-    /// 分析后的价值等级（high / medium / low / none）
-    pub value: String,
-    /// true = 低/无价值，未生成笔记；false = 已生成笔记
-    pub is_low_value: bool,
-    /// 低/无价值时：由 reason 构造的简短标题
-    pub card_title: Option<String>,
-    /// 低/无价值时：judge_value 返回的对话类型（debug / learning / …）
-    pub card_type: Option<String>,
-    /// 低/无价值时的原因说明（作为摘要展示）
-    pub reason: Option<String>,
-    /// 生成的卡片（仅 is_low_value = false 时有值）
-    pub card: Option<Card>,
-}
+const PROMPT_VERSION: &str = "v0.2.0-knowledge-1";
 
-/// 在阻塞线程内跑完 DB + Sidecar 全流程（避免阻塞 tokio worker）。
-///
-/// 流程：
-/// ```text
-/// analyzing 状态 → init → judge_value (PROMPT_B_LIGHT)
-///   ├── low / none → 更新 DB 为 analyzed + value → Ok(isLowValue=true)
-///   └── medium / high → distill_full (PROMPT_B_FULL) → insert_card → Ok(isLowValue=false)
-/// ```
 pub(crate) fn run_distill_pipeline(
     db: &Database,
     config: &AppConfig,
     sidecar: &SidecarManager,
     session_db_id: &str,
+    job_id: &str,
     provider_profile_id: Option<&str>,
-    initialize_provider: bool,
     on_phase: Option<&dyn Fn(&str)>,
-) -> Result<DistillSessionResult, String> {
+) -> Result<(), String> {
+    let started = std::time::Instant::now();
     let session = db.get_session(session_db_id).map_err(|e| e.to_string())?;
     let messages = db
         .get_session_messages(session_db_id)
@@ -234,36 +207,62 @@ pub(crate) fn run_distill_pipeline(
         return Err("会话正文为空，无法提炼".to_string());
     }
 
-    // 设置 analyzing 状态
+    let profile = config.api_profile(provider_profile_id)?;
+    let base_url_host = Url::parse(&profile.base_url)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+        .unwrap_or_else(|| "invalid-base-url".to_string());
+    let content_hash = session
+        .content_hash
+        .clone()
+        .unwrap_or_else(|| format!("{:x}", md5::compute(content.as_bytes())));
+    let run_id = db
+        .create_analysis_run(
+            job_id,
+            session_db_id,
+            &profile.id,
+            &profile.provider,
+            &base_url_host,
+            &profile.model,
+            &content_hash,
+            PROMPT_VERSION,
+        )
+        .map_err(|e| e.to_string())?;
+
     db.update_session_status(session_db_id, "analyzing", None)
         .map_err(|e| e.to_string())?;
 
-    // 用闭包包裹后续逻辑，确保任何真正失败都能将状态回退为 error
-    let result = (|| -> Result<DistillSessionResult, String> {
-        if initialize_provider {
-            let init_params = config.sidecar_init_params(provider_profile_id)?;
-            sidecar
-                .call_with_timeout::<serde_json::Value>(
-                    "init",
-                    init_params,
-                    std::time::Duration::from_secs(30),
-                )
-                .map_err(|e| format!("Sidecar init 失败：{}", e))?;
-        }
+    let mut value: Option<String> = None;
+    let mut reason: Option<String> = None;
+    let mut judge_tokens = (0, 0);
+    let mut extract_tokens = (0, 0);
+    let result = (|| -> Result<(), String> {
+        let processed: PreprocessResult = sidecar
+            .call_with_timeout(
+                "preprocess",
+                serde_json::json!({ "content": content, "traceId": trace_id }),
+                std::time::Duration::from_secs(30),
+            )
+            .map_err(|e| format!("对话预处理失败：{e}"))?;
 
-        // ── 第一步：轻量价值判断（PROMPT_B_LIGHT） ──
         if let Some(callback) = on_phase {
             callback("judging");
         }
         let judge: JudgeValueResult = sidecar
             .call_with_timeout(
                 "judge_value",
-                serde_json::json!({ "content": content, "traceId": trace_id }),
+                serde_json::json!({ "content": processed.content, "traceId": trace_id }),
                 std::time::Duration::from_secs(120),
             )
-            .map_err(|e| format!("价值判断（judge_value）失败：{}", e))?;
+            .map_err(|e| format!("价值判断失败：{e}"))?;
 
         let v_norm = judge.value.to_lowercase();
+        if !matches!(v_norm.as_str(), "high" | "medium" | "low" | "none") {
+            return Err(format!("响应格式错误：未知价值等级 {}", judge.value));
+        }
+        value = Some(v_norm.clone());
+        reason = Some(judge.reason.clone());
+        judge_tokens = (judge.prompt_tokens, judge.completion_tokens);
         log::info!(
             "trace_id={} 价值判断结果: {} (session={})",
             trace_id,
@@ -271,125 +270,117 @@ pub(crate) fn run_distill_pipeline(
             session_db_id
         );
 
-        // ── low / none：更新价值 + 持久化标题/类型/原因 → 正常返回（非错误） ──
         if v_norm == "low" || v_norm == "none" {
-            if let Err(e) = db.update_session_status(session_db_id, "analyzed", Some(&judge.value))
-            {
-                log::error!("低/无价值会话状态回写失败: {}", e);
-            }
-
-            // 由 reason 截取前 30 字符作为显示标题（不截断词，保留语义）
-            let title = build_analysis_title(&judge.reason);
-
-            // 将标题、类型、原因一并持久化，刷新后列表仍可正确展示
-            if let Err(e) = db.update_session_analysis_meta(
-                session_db_id,
-                &title,
-                &judge.card_type,
-                &judge.reason,
-            ) {
-                log::error!("写入 analysis_meta 失败: {}", e);
-            }
-
-            return Ok(DistillSessionResult {
-                trace_id: trace_id.clone(),
-                value: judge.value,
-                is_low_value: true,
-                card_title: Some(title),
-                card_type: Some(judge.card_type),
-                reason: Some(judge.reason),
-                card: None,
-            });
+            db.update_session_status(session_db_id, "analyzed", Some(&v_norm))
+                .map_err(|e| e.to_string())?;
+            return Ok(());
         }
 
-        if v_norm != "medium" && v_norm != "high" {
-            return Err(format!("未知的价值等级: {}", judge.value));
-        }
-
-        // ── 第二步：完整笔记提炼（PROMPT_B_FULL，仅 medium / high） ──
         if let Some(callback) = on_phase {
             callback("extracting");
         }
-        let full: DistillFullResult = sidecar
+        let extracted: ExtractKnowledgeResult = sidecar
             .call_with_timeout(
-                "distill_full",
-                serde_json::json!({ "content": content, "traceId": trace_id }),
+                "extract_knowledge",
+                serde_json::json!({ "content": processed.content, "traceId": trace_id }),
                 std::time::Duration::from_secs(300),
             )
-            .map_err(|e| format!("完整提炼（distill_full）失败：{}", e))?;
-
-        log::info!(
-            "trace_id={} distill_full 解析入库: tags 条目数={} {:?} | tech_stack 条目数={} {:?}",
-            trace_id,
-            full.tags.len(),
-            full.tags,
-            full.tech_stack.len(),
-            full.tech_stack
-        );
-
-        db.delete_cards_for_session(session_db_id)
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| format!("知识提取失败：{e}"))?;
+        if extracted.items.is_empty() || extracted.items.len() > 3 {
+            return Err("响应格式错误：知识项数量必须为 1–3".into());
+        }
+        extract_tokens = (extracted.prompt_tokens, extracted.completion_tokens);
 
         let source_name = config.source_display_name(&session.source_id);
         let project_name = session.project_name.clone();
-
-        let new_card = NewCard {
-            session_id: session_db_id,
-            title: full.title.as_str(),
-            card_type: Some(full.card_type.as_str()),
-            value: Some(full.value.as_str()),
-            summary: Some(full.summary.as_str()),
-            note: full.note.as_str(),
-            source_name: source_name.as_deref(),
-            project_name: project_name.as_deref(),
-            prompt_tokens: full.prompt_tokens.clamp(0, i32::MAX as i64) as i32,
-            completion_tokens: full.completion_tokens.clamp(0, i32::MAX as i64) as i32,
-            cost_yuan: 0.0,
-            tags: &full.tags,
-            tech_stack: &full.tech_stack,
+        let publication_status = if v_norm == "high"
+            && !db
+                .session_has_cards(session_db_id)
+                .map_err(|e| e.to_string())?
+        {
+            "published"
+        } else {
+            "draft"
         };
-
-        let card_id = db.insert_card(&new_card).map_err(|e| e.to_string())?;
-
-        db.update_session_status(session_db_id, "analyzed", Some(&full.value))
+        for item in &extracted.items {
+            db.insert_card(&NewCard {
+                session_id: session_db_id,
+                analysis_run_id: &run_id,
+                title: &item.title,
+                card_type: &item.card_type,
+                value: &v_norm,
+                summary: &item.summary,
+                note: &item.note,
+                publication_status,
+                source_name: source_name.as_deref(),
+                project_name: project_name.as_deref(),
+                prompt_tokens: extracted.prompt_tokens.clamp(0, i32::MAX as i64) as i32,
+                completion_tokens: extracted.completion_tokens.clamp(0, i32::MAX as i64) as i32,
+                cost_yuan: 0.0,
+                tags: &item.topic_tags,
+                tech_stack: &item.technologies,
+            })
             .map_err(|e| e.to_string())?;
+        }
 
-        let card = db.get_card(&card_id).map_err(|e| e.to_string())?;
-        Ok(DistillSessionResult {
-            trace_id: trace_id.clone(),
-            value: full.value,
-            is_low_value: false,
-            card_title: None,
-            card_type: None,
-            reason: None,
-            card: Some(card),
-        })
+        db.update_session_status(session_db_id, "analyzed", Some(&v_norm))
+            .map_err(|e| e.to_string())?;
+        Ok(())
     })();
 
-    // 真正失败时（非低价值场景），状态回退为 error
-    if let Err(ref e) = result {
-        if let Ok(s) = db.get_session(session_db_id) {
-            if s.status == "analyzing" {
-                let _ = db.update_session_error(session_db_id, e);
-            }
-        }
-    }
+    let error = result.as_ref().err().map(String::as_str);
+    let error_kind = error.map(classify_analysis_error);
+    db.finish_analysis_run(
+        &run_id,
+        value.as_deref(),
+        reason.as_deref(),
+        judge_tokens,
+        extract_tokens,
+        started.elapsed().as_millis().min(i64::MAX as u128) as i64,
+        error_kind,
+        error,
+    )
+    .map_err(|e| e.to_string())?;
 
-    result
+    if let Err(error) = result {
+        let kind = classify_analysis_error(&error);
+        let visible = format!(
+            "{}/{} · {}：{}",
+            profile.provider, profile.model, kind, error
+        );
+        let _ = db.update_session_error(session_db_id, &visible);
+        Err(visible)
+    } else {
+        Ok(())
+    }
 }
 
-/// 从 LLM 判断原因截取简短标题（最多 30 个 Unicode 字符，超出时附加省略号）。
-///
-/// 示例：
-///   "问题过于简单，答案是常识" → "问题过于简单，答案是常识"（未超长）
-///   "内容高度重复，没有新知识点，用户反复询问相同内容，建议归档。" → "内容高度重复，没有新知识点，用户反…"
-fn build_analysis_title(reason: &str) -> String {
-    const MAX_CHARS: usize = 30;
-    let chars: Vec<char> = reason.chars().collect();
-    if chars.len() <= MAX_CHARS {
-        reason.to_string()
+fn classify_analysis_error(error: &str) -> &'static str {
+    let text = error.to_ascii_lowercase();
+    if text.contains("401")
+        || text.contains("403")
+        || text.contains("api key")
+        || text.contains("鉴权")
+    {
+        "鉴权失败"
+    } else if text.contains("429") || text.contains("rate limit") || text.contains("限流") {
+        "请求限流"
+    } else if text.contains("model")
+        && (text.contains("404") || text.contains("not found") || text.contains("不存在"))
+    {
+        "模型不存在"
+    } else if text.contains("timeout") || text.contains("超时") {
+        "请求超时"
+    } else if text.contains("json") || text.contains("响应格式") {
+        "响应格式错误"
+    } else if text.contains("network")
+        || text.contains("connect")
+        || text.contains("dns")
+        || text.contains("网络")
+    {
+        "网络错误"
     } else {
-        chars[..MAX_CHARS].iter().collect::<String>() + "…"
+        "供应商请求失败"
     }
 }
 
