@@ -29,6 +29,9 @@ const status = computed(() => {
   if (props.session.value === 'medium') return { label: '待确认', tone: 'pending' }
   return { label: '已判断', tone: 'quiet' }
 })
+const sourceLabel = computed(() => ({
+  'claude-code': 'Claude Code', codex: 'Codex', cursor: 'Cursor', omp: 'Oh My Pi', pi: 'Pi', codebuddy: 'CodeBuddy',
+}[props.session.sourceId] ?? props.session.sourceId))
 
 function relativeTime(value: string | null | undefined) {
   if (!value) return '—'
@@ -53,15 +56,22 @@ function onAction(event: MouseEvent) {
 </script>
 
 <template>
-  <article class="session-row" :class="{ selected, disabled, analyzed }" @click="openSession">
+  <article class="session-row" :class="{ selected, disabled, analyzed }">
+    <button
+      type="button"
+      class="row-hit"
+      :disabled="disabled"
+      :aria-label="selectable ? `${selected ? '取消选择' : '选择'} ${title}` : `打开 ${sourceLabel} 会话：${title}`"
+      @click="openSession"
+    />
     <span class="status-rail" :data-tone="status.tone" />
     <div v-if="selectable" class="select-cell" @click.stop>
-      <n-checkbox :checked="selected" :disabled="disabled" @update:checked="!disabled && emit('update:selected', session.id, $event)" />
+      <n-checkbox :checked="selected" :disabled="disabled" :aria-label="`选择 ${title}`" @update:checked="!disabled && emit('update:selected', session.id, $event)" />
     </div>
     <div class="session-copy">
       <div class="eyebrow-row">
         <span class="status-label" :data-tone="status.tone">{{ status.label }}</span>
-        <span class="source-label">{{ session.sourceId }}</span>
+        <span class="source-label">{{ sourceLabel }}</span>
         <span v-if="session.cardType" class="type-label">{{ getCardTypeLabel(session.cardType) }}</span>
       </div>
       <h3>{{ title }}</h3>
@@ -87,27 +97,29 @@ function onAction(event: MouseEvent) {
 .session-row { position:relative; display:grid; grid-template-columns:minmax(0,1fr) 150px 74px; gap:20px; align-items:center; min-height:132px; padding:18px 18px 18px 22px; border-top:1px solid var(--line); background:transparent; cursor:pointer; transition:background-color .14s ease; }
 .session-row:last-child { border-bottom:1px solid var(--line); }
 .session-row:hover { background:color-mix(in srgb,var(--surface) 72%,transparent); }
+.row-hit { position:absolute; inset:0; z-index:0; appearance:none; border:0; background:transparent; cursor:pointer; }
+.row-hit:focus-visible { outline:2px solid var(--pine); outline-offset:-2px; }
 .session-row.selected { background:color-mix(in srgb,var(--pine) 9%,transparent); }
 .session-row.disabled { cursor:default; opacity:.58; }
-.status-rail { position:absolute; left:0; top:22px; bottom:22px; width:2px; background:var(--line-strong); }
+.status-rail { position:absolute; left:0; top:22px; bottom:22px; width:2px; background:var(--line-strong); pointer-events:none; }
 .status-rail[data-tone='active'] { background:var(--pine); }
 .status-rail[data-tone='pending'] { background:var(--vermilion); }
-.status-rail[data-tone='danger'] { background:#a9482f; }
-.select-cell { position:absolute; left:12px; top:15px; }
+.status-rail[data-tone='danger'] { background:var(--vermilion); }
+.select-cell { position:absolute; z-index:2; left:12px; top:15px; }
 .session-row:has(.select-cell) { padding-left:46px; }
-.session-copy { min-width:0; }
+.session-copy { position:relative; z-index:1; min-width:0; pointer-events:none; }
 .eyebrow-row { display:flex; align-items:center; gap:9px; margin-bottom:7px; min-width:0; font-size:10px; letter-spacing:.08em; text-transform:uppercase; }
 .status-label,.source-label,.type-label { color:var(--muted); }
 .status-label[data-tone='active'] { color:var(--pine); }
 .status-label[data-tone='pending'] { color:var(--vermilion); }
-.status-label[data-tone='danger'] { color:#a9482f; }
+.status-label[data-tone='danger'] { color:var(--vermilion); }
 .source-label::before,.type-label::before { content:'·'; margin-right:9px; color:var(--line-strong); }
 h3 { margin:0; overflow:hidden; color:var(--ink); font-family:var(--font-editorial); font-size:17px; font-weight:600; line-height:1.45; text-overflow:ellipsis; white-space:nowrap; }
 .description { display:-webkit-box; max-width:860px; margin:5px 0 0; overflow:hidden; color:var(--muted); font-size:12px; line-height:1.6; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
 .topic-row { display:flex; flex-wrap:wrap; gap:10px; margin-top:8px; color:var(--pine); font-size:10px; }
-.session-meta { display:flex; flex-direction:column; gap:5px; min-width:0; color:var(--muted); font-size:11px; line-height:1.35; }
+.session-meta { position:relative; z-index:1; display:flex; flex-direction:column; gap:5px; min-width:0; color:var(--muted); font-size:11px; line-height:1.35; pointer-events:none; }
 .project { overflow:hidden; color:var(--ink-soft); text-overflow:ellipsis; white-space:nowrap; }
-.row-action { opacity:.2; transition:opacity .14s ease; }
+.row-action { z-index:2; opacity:.2; transition:opacity .14s ease; }
 .session-row:hover .row-action,.row-action:focus-visible { opacity:1; }
 @media (max-width:900px) { .session-row { grid-template-columns:minmax(0,1fr) 70px; } .session-meta { display:none; } }
 </style>

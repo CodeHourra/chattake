@@ -47,12 +47,12 @@ const themeOverrides = computed(() => ({
   --surface-glass: rgba(250, 248, 242, .78);
   --ink: #1a1c1a;
   --ink-soft: #4f524e;
-  --muted: #747671;
+  --muted: #62655f;
   --line: #d7d2c8;
   --line-strong: #c9c5bb;
   --pine: #31594f;
   --pine-soft: #dce8e2;
-  --vermilion: #c85f32;
+  --vermilion: #a84b27;
   --paper: var(--canvas);
   --paper-raised: var(--surface);
   --font-editorial: 'Songti SC', 'STSong', 'Noto Serif CJK SC', serif;
@@ -100,6 +100,22 @@ body {
 .glass-sidebar { border-color: color-mix(in srgb, var(--line) 66%, transparent) !important; }
 
 ::selection { background: color-mix(in srgb, var(--vermilion) 28%, transparent); }
+
+:root:not(.dark) .text-slate-400,
+:root:not(.dark) .text-neutral-400,
+:root:not(.dark) .text-slate-500,
+:root:not(.dark) .text-neutral-500 { color:var(--muted) !important; }
+:root.dark .dark\:text-slate-500,
+:root.dark .dark\:text-neutral-500 { color:var(--muted) !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}
 
 /* Webkit 滚动条 */
 ::-webkit-scrollbar {

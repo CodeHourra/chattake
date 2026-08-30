@@ -226,8 +226,13 @@ function openSearchHit(cardId: string, sessionId: string) {
       <div
         v-for="c in search.results"
         :key="c.id"
+        role="link"
+        tabindex="0"
+        :aria-label="`打开知识：${c.title}`"
         class="rounded-lg border border-slate-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 cursor-pointer hover:border-emerald-300 dark:hover:border-emerald-800 transition-all group"
         @click="openSearchHit(c.id, c.sessionId)"
+        @keydown.enter.prevent="openSearchHit(c.id, c.sessionId)"
+        @keydown.space.prevent="openSearchHit(c.id, c.sessionId)"
       >
         <div class="flex items-center justify-between gap-3">
           <div class="min-w-0">

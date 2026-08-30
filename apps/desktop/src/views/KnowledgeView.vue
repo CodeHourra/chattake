@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * 知识库 —— 笔记卡片列表 / 卡片网格双视图，内容区固定高度可滚动，分页贴底。
+ * 知识库 —— 档案索引的舒展 / 紧凑双密度视图，内容区固定高度可滚动，分页贴底。
  *
  * 视图模式持久化：localStorage key `chattake:knowledgeViewMode`
  */
@@ -287,8 +287,8 @@ function onExportAll() {
             ]"
             @click="viewMode = 'list'"
           >
-            <span class="i-lucide-list w-3.5 h-3.5" />
-            列表
+            <span class="i-lucide-align-justify w-3.5 h-3.5" />
+            紧凑
           </button>
           <button
             type="button"
@@ -301,8 +301,8 @@ function onExportAll() {
             ]"
             @click="viewMode = 'card'"
           >
-            <span class="i-lucide-layout-grid w-3.5 h-3.5" />
-            卡片
+            <span class="i-lucide-rows-3 w-3.5 h-3.5" />
+            舒展
           </button>
         </div>
       </div>
@@ -357,159 +357,44 @@ function onExportAll() {
 
       <n-empty v-else-if="!items.length" description="暂无知识卡片" class="py-16" />
 
-      <!-- 卡片视图；选中 ring-inset：根节点 overflow-hidden 会裁掉外向 ring，见 docs/踩坑/桌面应用-Tailwind-ring与overflow-hidden裁切.md -->
-      <div
-        v-else-if="viewMode === 'card'"
-        class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"
-      >
-        <div
+      <div v-else class="knowledge-index" :data-density="viewMode">
+        <article
           v-for="c in items"
           :key="c.id"
-          class="group relative rounded-2xl border bg-white dark:bg-neutral-900 transition-all duration-300 cursor-pointer overflow-hidden flex flex-col"
-          :class="[
-            selectedIds.has(c.id)
-              ? 'ring-2 ring-inset ring-emerald-500 border-transparent bg-emerald-50/30 dark:bg-emerald-950/30'
-              : 'border-slate-200/80 dark:border-neutral-700/60 hover:border-emerald-300 dark:hover:border-emerald-700',
-          ]"
-          @click="open(c)"
+          class="knowledge-row"
+          :class="{ selected: selectedIds.has(c.id) }"
         >
-          <!-- 卡片主体 -->
-          <div class="p-5 flex-1 flex flex-col gap-3">
-            <div class="flex items-start justify-between">
-              <div class="flex items-center gap-2 flex-wrap">
-                <n-tag v-if="c.type" size="small" :bordered="false" type="success" class="font-medium rounded">
-                  {{ getCardTypeLabel(c.type) }}
-                </n-tag>
-                <n-tag
-                  v-if="c.value"
-                  size="small"
-                  :bordered="false"
-                  :type="c.value === 'high' ? 'success' : c.value === 'medium' ? 'warning' : 'default'"
-                  class="rounded"
-                >
-                  {{ c.value === 'high' ? '高价值' : c.value === 'medium' ? '中价值' : c.value }}
-                </n-tag>
-                <n-tag v-if="c.publicationStatus === 'draft'" size="small" :bordered="false" type="warning">草稿</n-tag>
-              </div>
-              <div class="shrink-0" @click.stop>
-                <n-checkbox
-                  :checked="selectedIds.has(c.id)"
-                  size="small"
-                  @update:checked="(v: boolean) => toggleSelect(c.id, v)"
-                />
-              </div>
-            </div>
-
-            <div class="flex-1">
-              <h3 class="text-base font-semibold text-slate-800 dark:text-slate-100 leading-snug group-hover:text-emerald-700 dark:group-hover:text-emerald-400 transition-colors">
-                {{ c.title }}
-              </h3>
-              <p class="text-[13px] text-slate-500 dark:text-slate-400 line-clamp-3 mt-2 leading-relaxed">
-                {{ c.summary || '暂无摘要' }}
-              </p>
-            </div>
-          </div>
-
-          <!-- 卡片底部 -->
-          <div class="px-5 py-3.5 bg-slate-50/50 dark:bg-neutral-800/30 border-t border-slate-100 dark:border-neutral-800 flex flex-col gap-2.5">
-            <div class="flex items-center justify-between text-[12px]">
-              <span class="flex items-center gap-1.5 font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-neutral-800 px-2 py-0.5 rounded border border-slate-200 dark:border-neutral-700">
-                <span class="i-lucide-folder w-3.5 h-3.5 text-slate-400" />
-                {{ c.projectName || '—' }}
-              </span>
-              <span v-if="c.sourceName" class="flex items-center gap-1.5 text-slate-400 dark:text-slate-500 font-mono bg-white dark:bg-neutral-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-neutral-700">
-                <span class="i-lucide-terminal w-3 h-3" />
-                {{ c.sourceName }}
-              </span>
-            </div>
-            <div class="flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500 mt-1">
-              <span class="flex items-center gap-1.5">
-                <span class="i-lucide-clock w-3 h-3" />
-                {{ formatTime(c.updatedAt) }}
-              </span>
-              <span class="opacity-0 group-hover:opacity-100 transition-opacity font-medium text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                阅读笔记 <span class="i-lucide-arrow-right w-3 h-3" />
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 列表视图；选中态同卡片：ring-inset 避免 overflow-hidden 裁切 -->
-      <div v-else class="space-y-4">
-        <div
-          v-for="c in items"
-          :key="'list-'+c.id"
-          class="group relative rounded-xl border bg-white dark:bg-neutral-900 transition-all duration-300 cursor-pointer overflow-hidden flex items-center"
-          :class="[
-            selectedIds.has(c.id)
-              ? 'ring-2 ring-inset ring-emerald-500 border-transparent bg-emerald-50/30 dark:bg-emerald-950/30'
-              : 'border-slate-200/80 dark:border-neutral-700/60 hover:border-emerald-300 dark:hover:border-emerald-700',
-          ]"
-          @click="open(c)"
-        >
-          <!-- Checkbox -->
-          <div class="pl-4 shrink-0" @click.stop>
+          <button type="button" class="knowledge-hit" :aria-label="`阅读知识：${c.title}`" @click="open(c)" />
+          <span class="knowledge-rail" :data-value="c.value || 'none'" />
+          <div class="knowledge-select" @click.stop>
             <n-checkbox
               :checked="selectedIds.has(c.id)"
-              size="small"
-              @update:checked="(v: boolean) => toggleSelect(c.id, v)"
+              :aria-label="`选择 ${c.title}`"
+              @update:checked="(value: boolean) => toggleSelect(c.id, value)"
             />
           </div>
-
-          <!-- 列表项内容 -->
-          <div class="flex-1 p-4 flex items-center gap-4">
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2 mb-1">
-                <n-tag v-if="c.type" size="small" :bordered="false" type="success" class="font-medium rounded !text-[11px]">
-                  {{ getCardTypeLabel(c.type) }}
-                </n-tag>
-                <n-tag
-                  v-if="c.value"
-                  size="small"
-                  :bordered="false"
-                  :type="c.value === 'high' ? 'success' : c.value === 'medium' ? 'warning' : 'default'"
-                  class="rounded !text-[11px]"
-                >
-                  {{ c.value === 'high' ? '高价值' : c.value === 'medium' ? '中价值' : c.value }}
-                </n-tag>
-                <h3 class="text-[15px] font-semibold text-slate-800 dark:text-slate-100 truncate group-hover:text-emerald-700 dark:group-hover:text-emerald-400 transition-colors">
-                  {{ c.title }}
-                </h3>
-              </div>
-              <p class="text-[13px] text-slate-500 dark:text-slate-400 truncate">
-                {{ c.summary || '暂无摘要' }}
-              </p>
+          <div class="knowledge-copy">
+            <div class="knowledge-eyebrow">
+              <span v-if="c.type">{{ getCardTypeLabel(c.type) }}</span>
+              <span v-if="c.value">{{ c.value === 'high' ? '高价值' : c.value === 'medium' ? '中价值' : c.value }}</span>
+              <span v-if="c.publicationStatus === 'draft'" class="draft-mark">草稿</span>
             </div>
-
-            <!-- 元数据 -->
-            <div class="flex items-center gap-4 shrink-0 text-[12px] text-slate-400 dark:text-slate-500">
-              <span class="flex items-center gap-1.5 w-24">
-                <span class="i-lucide-folder w-3.5 h-3.5" />
-                <span class="truncate">{{ c.projectName || '—' }}</span>
-              </span>
-              <span v-if="c.sourceName" class="flex items-center gap-1.5 w-24">
-                <span class="i-lucide-terminal w-3 h-3" />
-                <span class="truncate">{{ c.sourceName }}</span>
-              </span>
-              <span class="flex items-center gap-1.5 w-32">
-                <span class="i-lucide-clock w-3.5 h-3.5" />
-                {{ formatTime(c.updatedAt) }}
-              </span>
-            </div>
-
-            <!-- 操作按钮 -->
-            <div class="opacity-0 group-hover:opacity-100 transition-opacity duration-200 shrink-0 w-24 flex justify-end">
-              <n-button secondary size="small" class="rounded-lg">
-                <template #icon>
-                  <span class="i-lucide-book-open w-4 h-4" />
-                </template>
-                阅读笔记
-              </n-button>
+            <h3>{{ c.title }}</h3>
+            <p>{{ c.summary || '暂无摘要' }}</p>
+            <div v-if="c.tags.length || c.technologies.length" class="knowledge-tags">
+              <span v-for="tag in c.tags.slice(0, 3)" :key="tag"># {{ tag }}</span>
+              <span v-for="tech in c.technologies.slice(0, 3)" :key="tech" class="technology">{{ tech }}</span>
             </div>
           </div>
-        </div>
+          <div class="knowledge-meta">
+            <span>{{ c.projectName || '未关联项目' }}</span>
+            <span v-if="c.sourceName">{{ c.sourceName }}</span>
+            <time>{{ formatTime(c.updatedAt) }}</time>
+          </div>
+          <span class="i-lucide-arrow-up-right knowledge-arrow" aria-hidden="true" />
+        </article>
       </div>
+
     </div>
 
     <!-- 分页 -->
@@ -539,3 +424,29 @@ function onExportAll() {
     </n-modal>
   </div>
 </template>
+
+<style scoped>
+.knowledge-index { border-top:1px solid var(--line); }
+.knowledge-row { position:relative; display:grid; grid-template-columns:minmax(0,1fr) 150px 22px; gap:22px; align-items:center; min-height:142px; padding:20px 18px 20px 48px; border-bottom:1px solid var(--line); transition:background-color .14s ease; }
+.knowledge-row:hover,.knowledge-row.selected { background:color-mix(in srgb,var(--surface) 72%,transparent); }
+.knowledge-hit { position:absolute; inset:0; z-index:0; appearance:none; border:0; background:transparent; cursor:pointer; }
+.knowledge-hit:focus-visible { outline:2px solid var(--pine); outline-offset:-2px; }
+.knowledge-rail { position:absolute; left:0; top:24px; bottom:24px; width:2px; background:var(--line-strong); pointer-events:none; }
+.knowledge-rail[data-value='high'] { background:var(--vermilion); }
+.knowledge-rail[data-value='medium'] { background:var(--pine); }
+.knowledge-select { position:absolute; left:16px; top:22px; z-index:2; }
+.knowledge-copy { position:relative; z-index:1; min-width:0; pointer-events:none; }
+.knowledge-eyebrow { display:flex; gap:16px; margin-bottom:7px; color:var(--muted); font-size:10px; letter-spacing:.09em; text-transform:uppercase; }
+.knowledge-eyebrow span + span::before { content:'·'; margin-right:16px; color:var(--line-strong); }
+.knowledge-eyebrow .draft-mark { color:var(--vermilion); }
+.knowledge-copy h3 { margin:0; color:var(--ink); font-family:var(--font-editorial); font-size:18px; font-weight:600; line-height:1.45; }
+.knowledge-copy p { display:-webkit-box; margin:6px 0 0; overflow:hidden; color:var(--muted); font-size:12px; line-height:1.65; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+.knowledge-tags { display:flex; flex-wrap:wrap; gap:11px; margin-top:9px; color:var(--pine); font-size:10px; }
+.knowledge-tags .technology { color:var(--ink-soft); }
+.knowledge-meta { position:relative; z-index:1; display:flex; flex-direction:column; gap:6px; min-width:0; color:var(--muted); font-size:11px; pointer-events:none; }
+.knowledge-meta span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.knowledge-arrow { position:relative; z-index:1; width:15px; height:15px; color:var(--muted); opacity:.35; pointer-events:none; }
+.knowledge-row:hover .knowledge-arrow { color:var(--pine); opacity:1; }
+.knowledge-index[data-density='list'] .knowledge-row { min-height:112px; padding-top:15px; padding-bottom:15px; }
+@media (max-width:1000px) { .knowledge-row { grid-template-columns:minmax(0,1fr) 22px; } .knowledge-meta { display:none; } }
+</style>

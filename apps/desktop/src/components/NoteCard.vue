@@ -23,7 +23,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <article class="rounded-2xl border border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-6 shadow-sm">
+  <article class="note-document">
     <NoteHeader
       :title="card.title"
       :summary="card.summary"
@@ -54,3 +54,7 @@ const emit = defineEmits<{
     />
   </article>
 </template>
+
+<style scoped>
+.note-document { padding:30px 4px 44px; border-top:1px solid var(--line); background:transparent; }
+</style>

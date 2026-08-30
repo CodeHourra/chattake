@@ -67,7 +67,7 @@ function getSourceMeta(sourceId: string) {
 function renderSourceIcon(sourceId: string) {
   const meta = getSourceMeta(sourceId)
   if (meta.imgIcon) {
-    return h('img', { src: meta.imgIcon, class: 'brand-icon', width: 16, height: 16 })
+    return h('img', { src: meta.imgIcon, alt: '', 'aria-hidden': 'true', class: 'brand-icon', width: 16, height: 16 })
   }
   return h('span', { class: `${meta.fallbackIcon} w-4 h-4 opacity-70` })
 }
@@ -439,8 +439,9 @@ watch(() => ui.activeTab, (tab) => {
         <!-- 顶部操作区 -->
         <div class="p-3 pb-2 space-y-2 border-b border-slate-100 dark:border-neutral-800">
           <!-- 全部对话按钮 -->
-          <div
-            class="flex items-center gap-2 px-2.5 py-1.5 rounded-md transition-colors cursor-pointer text-sm font-medium"
+          <button
+            type="button"
+            class="appearance-none border-0 bg-transparent w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md transition-colors cursor-pointer text-sm font-medium"
             :class="isAllMode
               ? 'all-active'
               : 'text-slate-700 dark:text-neutral-300 hover:bg-slate-100 dark:hover:bg-neutral-900'"
@@ -449,7 +450,7 @@ watch(() => ui.activeTab, (tab) => {
             <span class="i-lucide-messages-square w-4 h-4 shrink-0" />
             <span>全部对话</span>
             <span class="ml-auto text-xs opacity-80 tabular-nums">{{ totalSessions }}</span>
-          </div>
+          </button>
 
           <!-- 会话整理按钮 -->
           <n-tooltip
@@ -579,9 +580,10 @@ watch(() => ui.activeTab, (tab) => {
                 单选；点「全部」或已选类型可恢复不限类型。
               </p>
               <div class="flex flex-wrap gap-2">
-                <span
+                <button
+                  type="button"
                   :class="[
-                    'px-2.5 py-1 rounded-full text-xs font-medium cursor-pointer transition-colors',
+                    'appearance-none bg-transparent px-2.5 py-1 rounded-full text-xs font-medium cursor-pointer transition-colors',
                     !filters.cardType
                       ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60'
                       : 'text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-neutral-700 hover:bg-slate-50 dark:hover:bg-neutral-800',
@@ -589,12 +591,13 @@ watch(() => ui.activeTab, (tab) => {
                   @click="filters.cardType = ''"
                 >
                   全部 <span class="opacity-60 ml-0.5 text-[10px]">{{ totalCards }}</span>
-                </span>
-                <span
+                </button>
+                <button
                   v-for="t in sidebar.cardTypes"
                   :key="t.name"
+                  type="button"
                   :class="[
-                    'px-2.5 py-1 rounded-full text-xs cursor-pointer transition-colors',
+                    'appearance-none bg-transparent px-2.5 py-1 rounded-full text-xs cursor-pointer transition-colors',
                     filters.cardType === t.name
                       ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60 font-medium'
                       : 'text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-neutral-700 hover:bg-slate-50 dark:hover:bg-neutral-800',
@@ -602,7 +605,7 @@ watch(() => ui.activeTab, (tab) => {
                   @click="selectCardType(t.name)"
                 >
                   {{ getCardTypeLabel(t.name) }} <span class="opacity-60 ml-0.5 text-[10px]">{{ t.count }}</span>
-                </span>
+                </button>
               </div>
             </n-collapse-item>
 
@@ -628,11 +631,12 @@ watch(() => ui.activeTab, (tab) => {
                 <n-spin size="small" />
               </div>
               <div v-else-if="sidebar.tags.length" class="flex flex-wrap gap-1.5">
-                <span
+                <button
                   v-for="tag in sidebar.tags"
                   :key="tag.name"
+                  type="button"
                   :class="[
-                    'px-2.5 py-1 rounded-full text-xs cursor-pointer transition-colors',
+                    'appearance-none bg-transparent px-2.5 py-1 rounded-full text-xs cursor-pointer transition-colors',
                     filters.selectedTags.includes(tag.name)
                       ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60 font-medium'
                       : 'text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-neutral-700 hover:bg-slate-50 dark:hover:bg-neutral-800',
@@ -640,7 +644,7 @@ watch(() => ui.activeTab, (tab) => {
                   @click="toggleTag(tag.name)"
                 >
                   {{ tag.name }} <span class="opacity-50 ml-0.5 text-[10px]">{{ tag.count }}</span>
-                </span>
+                </button>
               </div>
               <n-empty v-else size="small" description="暂无标签" class="py-2" />
             </n-collapse-item>
@@ -667,11 +671,12 @@ watch(() => ui.activeTab, (tab) => {
                 <n-spin size="small" />
               </div>
               <div v-else-if="sidebar.techStacks.length" class="flex flex-wrap gap-1.5">
-                <span
+                <button
                   v-for="row in sidebar.techStacks"
                   :key="row.name"
+                  type="button"
                   :class="[
-                    'px-2.5 py-1 rounded-full text-xs cursor-pointer transition-colors',
+                    'appearance-none bg-transparent px-2.5 py-1 rounded-full text-xs cursor-pointer transition-colors',
                     filters.selectedTechStacks.includes(row.name)
                       ? 'bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800/60 font-medium'
                       : 'text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-neutral-700 hover:bg-slate-50 dark:hover:bg-neutral-800',
@@ -679,7 +684,7 @@ watch(() => ui.activeTab, (tab) => {
                   @click="toggleTechStack(row.name)"
                 >
                   {{ row.name }} <span class="opacity-50 ml-0.5 text-[10px]">{{ row.count }}</span>
-                </span>
+                </button>
               </div>
               <p v-else class="text-[11px] text-slate-400 dark:text-neutral-500 py-2 leading-relaxed">
                 暂无。需会话经提炼写入 tech_stack；排查终端

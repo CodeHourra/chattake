@@ -26,6 +26,7 @@ const showSettings = ref(false)
 /** 独立「软件更新」弹窗（与设置解耦） */
 const showAppUpdate = ref(false)
 const syncing = computed(() => queue.jobs.some((job) => job.kind === 'sync' && ['queued', 'running'].includes(job.status)))
+const activeJob = computed(() => queue.jobs.find((job) => ['queued', 'running'].includes(job.status)))
 
 /** 顶栏「导出」下拉：与知识库页能力对齐 */
 const exportDropdownOptions: DropdownOption[] = [
@@ -108,7 +109,7 @@ async function onSync() {
       <div class="flex items-center bg-slate-100/80 dark:bg-neutral-900/55 p-1 rounded-lg">
         <button
           type="button"
-          class="segment-pill-btn nav-tab flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium cursor-pointer border-0 outline-none"
+          class="segment-pill-btn nav-tab flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium cursor-pointer border-0"
           :class="{ active: ui.activeTab === 'sessions' }"
           @click="onTabChange('sessions')"
         >
@@ -117,7 +118,7 @@ async function onSync() {
         </button>
         <button
           type="button"
-          class="segment-pill-btn nav-tab flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium cursor-pointer border-0 outline-none"
+          class="segment-pill-btn nav-tab flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium cursor-pointer border-0"
           :class="{ active: ui.activeTab === 'library' }"
           @click="onTabChange('library')"
         >
@@ -129,6 +130,11 @@ async function onSync() {
 
     <!-- 右侧：同步 + 工具按钮 -->
     <div class="flex items-center gap-2">
+      <div v-if="activeJob" class="top-progress" aria-live="polite">
+        <span>{{ activeJob.kind === 'sync' ? '同步' : '分析' }}</span>
+        <span class="tabular-nums">{{ activeJob.done }}/{{ activeJob.total }}</span>
+        <span class="top-progress-track"><i :style="{ width: `${activeJob.total ? activeJob.done / activeJob.total * 100 : 0}%` }" /></span>
+      </div>
       <n-button
         size="small"
         secondary
@@ -201,6 +207,10 @@ async function onSync() {
 .product-tagline { color:var(--muted); font-size:9px; font-weight:500; line-height:1.3; letter-spacing:.12em; }
 .nav-tab { position: relative; color: var(--muted); transition: color .14s ease, background .14s ease; }
 .nav-tab:hover { color: var(--ink); }
+.nav-tab:focus-visible { outline:2px solid var(--pine); outline-offset:2px; }
 .nav-tab.active { color: var(--ink); background: color-mix(in srgb, var(--paper-raised) 82%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 72%, transparent); }
 .nav-tab.active::after { content: ''; position: absolute; left: 16px; right: 16px; bottom: -5px; height: 2px; border-radius: 2px; background: var(--vermilion); }
+.top-progress { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:10px; }
+.top-progress-track { width:48px; height:2px; overflow:hidden; background:var(--line); }
+.top-progress-track i { display:block; height:100%; background:var(--pine); transition:width .16s linear; }
 </style>

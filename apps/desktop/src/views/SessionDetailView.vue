@@ -185,9 +185,14 @@ function publish(replaceExisting: boolean) {
 
 const sourceIcon = computed(() => {
   if (!session.value) return 'i-lucide-message-square'
-  if (session.value.sourceId === 'claude-code') return 'i-lucide-bot'
-  if (session.value.sourceId === 'cursor') return 'i-lucide-terminal-square'
-  return 'i-lucide-message-square'
+  return {
+    'claude-code': 'i-lucide-terminal',
+    codex: 'i-lucide-code-2',
+    cursor: 'i-lucide-mouse-pointer-click',
+    omp: 'i-lucide-orbit',
+    pi: 'i-lucide-circle-dot',
+    codebuddy: 'i-lucide-code',
+  }[session.value.sourceId] ?? 'i-lucide-message-square'
 })
 
 const statusTagType = computed<'default' | 'info' | 'success' | 'error'>(() => {
@@ -219,15 +224,15 @@ const statusLabel = computed(() => {
 })
 
 const valueColors: Record<string, string> = {
-  high: '#10b981',
-  medium: '#f59e0b',
-  low: '#94a3b8',
+  high: '#31594f',
+  medium: '#9f4526',
+  low: '#5d615b',
 }
 </script>
 
 <template>
-  <div class="flex flex-col h-full">
-    <div class="shrink-0 border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 px-5 py-3">
+  <div class="detail-page flex flex-col h-full">
+    <div class="detail-header shrink-0 border-b px-5 py-3">
       <div class="max-w-4xl mx-auto flex items-start gap-4">
         <n-button text size="small" class="mt-0.5 shrink-0" @click="close">
           <span class="inline-flex items-center gap-1 text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200">
@@ -306,7 +311,7 @@ const valueColors: Record<string, string> = {
       </div>
     </div>
 
-    <div class="flex-1 min-h-0 overflow-y-auto">
+    <div class="detail-scroll flex-1 min-h-0 overflow-y-auto">
       <div class="max-w-4xl mx-auto px-5 py-5">
         <div v-if="loading" class="flex items-center justify-center py-20">
           <n-spin size="medium" />
@@ -458,3 +463,9 @@ const valueColors: Record<string, string> = {
     </div>
   </div>
 </template>
+
+<style scoped>
+.detail-page { color:var(--ink); background:var(--canvas); }
+.detail-header { border-color:var(--line); background:color-mix(in srgb,var(--surface) 84%,transparent); }
+.detail-scroll { background:var(--canvas); }
+</style>
