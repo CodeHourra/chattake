@@ -96,36 +96,3 @@ export function logOutgoingOpenAiChat(args: {
     ),
   )
 }
-
-/**
- * CLI 模式：单条合并 prompt，与 HTTP 双消息不等价，单独打日志避免误解。
- */
-export function logCliMergedPrompt(args: {
-  traceId: string
-  callLabel: string
-  command: string
-  systemPartLen: number
-  userLen: number
-  mergedLen: number
-  mergedFull: string
-}): void {
-  const full = process.env[ENV_DISTILL_PAYLOAD_FULL] === '1'
-  const { traceId, callLabel, command, systemPartLen, userLen, mergedLen, mergedFull } = args
-  console.error(
-    distillLog(
-      traceId,
-      `[cli-provider] CLI 合并请求 ${callLabel}: ${command} | system段=${systemPartLen} user段=${userLen} 合并=${mergedLen} | md5[0:16]=${md5Prefix16(mergedFull)}`,
-    ),
-  )
-  if (full) {
-    console.error(distillLog(traceId, `====== BEGIN merged prompt (${callLabel}) ======`))
-    console.error(mergedFull)
-    console.error(distillLog(traceId, `====== END merged prompt ======`))
-    return
-  }
-  const p = previewHeadTail(mergedFull, PREVIEW_CHARS)
-  console.error(distillLog(traceId, `merged 预览 前${PREVIEW_CHARS} 字符:\n${p.head}`))
-  if (p.omitted && p.tail) {
-    console.error(distillLog(traceId, `merged 预览 后${PREVIEW_CHARS} 字符:\n${p.tail}`))
-  }
-}

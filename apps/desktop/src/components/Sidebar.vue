@@ -52,7 +52,7 @@ const checkedKeys = ref<string[]>([])
 const SOURCE_META: Record<string, { label: string; imgIcon?: string; fallbackIcon: string }> = {
   'claude-code': { label: 'Claude Code', imgIcon: claudeCodeIcon, fallbackIcon: 'i-lucide-terminal' },
   'cursor': { label: 'Cursor', imgIcon: cursorIcon, fallbackIcon: 'i-lucide-mouse-pointer-click' },
-  'codebuddy-cli': { label: 'CodeBuddy', imgIcon: codebuddyIcon, fallbackIcon: 'i-lucide-code' },
+  codebuddy: { label: 'CodeBuddy', imgIcon: codebuddyIcon, fallbackIcon: 'i-lucide-code' },
   'codebuddy-jetbrains': { label: 'CodeBuddy JB', imgIcon: codebuddyIcon, fallbackIcon: 'i-lucide-braces' },
 }
 

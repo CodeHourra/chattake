@@ -46,10 +46,10 @@ pub fn run() {
 
     let config = AppConfig::load(None).expect("配置加载失败");
     log::info!(
-        "已加载 {} 个数据源，{} 个已启用，提炼模式: {}",
+        "已加载 {} 个数据源，{} 个已启用，API 配置: {} 套",
         config.collector.sources.len(),
         config.enabled_sources().len(),
-        config.distiller.mode,
+        config.distiller.profiles.len(),
     );
 
     let db = Database::open_default().expect("数据库初始化失败");
@@ -101,7 +101,8 @@ pub fn run() {
             commands::sidebar::list_card_types,
             commands::config::get_config,
             commands::config::save_config,
-            commands::cli_probe::probe_cli_tools,
+            commands::config::list_provider_models,
+            commands::config::test_provider,
         ])
         .run(context)
         .expect("Tauri 应用启动失败");

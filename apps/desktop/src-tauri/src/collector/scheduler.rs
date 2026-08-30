@@ -79,7 +79,7 @@ impl<'a> CollectorScheduler<'a> {
                     let collector = CursorCollector::new(scan_dirs);
                     collector.collect()
                 }
-                "codebuddy-cli" => {
+                "codebuddy" => {
                     let collector = CodeBuddyCollector::new(scan_dirs);
                     collector.collect()
                 }

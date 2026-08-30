@@ -12,7 +12,7 @@
 //! 单条消息：messages/{id}.json 内 message 为 JSON 字符串，解析后取 content（字符串 / text 块数组 / 旧版单字符数组，见 `docs/CodeBuddy 会话记录提取逻辑文档.md`）。
 //! ```
 //!
-//! source_id 仍为 `codebuddy-cli`，与现有 config.toml / 侧栏 id 兼容。
+//! source_id 为 `codebuddy`。
 
 use std::collections::HashSet;
 use std::fs;
@@ -24,7 +24,7 @@ use walkdir::WalkDir;
 
 use super::normalizer::{NormalizedMessage, NormalizedSession};
 
-const SOURCE_ID: &str = "codebuddy-cli";
+const SOURCE_ID: &str = "codebuddy";
 
 /// CodeBuddy（扩展）采集器
 pub struct CodeBuddyCollector {

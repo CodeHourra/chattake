@@ -5,7 +5,6 @@
 
 pub mod cards;
 pub mod export;
-pub mod cli_probe;
 pub mod config;
 pub mod sessions;
 pub mod sidebar;

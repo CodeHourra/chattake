@@ -481,10 +481,7 @@ mod tests {
     #[ignore]
     fn test_real_local_data() {
         let home = dirs::home_dir().unwrap();
-        let collector = ClaudeCodeCollector::new(vec![
-            home.join(".claude"),
-            home.join(".claude-internal"),
-        ]);
+        let collector = ClaudeCodeCollector::new(vec![home.join(".claude")]);
 
         let sessions = collector.collect();
         println!("\n=== Claude Code 采集结果 ===");

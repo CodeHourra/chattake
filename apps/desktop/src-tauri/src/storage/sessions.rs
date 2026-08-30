@@ -601,7 +601,7 @@ mod tests {
 
         let id = db
             .insert_session(
-                "codebuddy-cli",
+                "codebuddy",
                 "sess-2",
                 "local",
                 None,

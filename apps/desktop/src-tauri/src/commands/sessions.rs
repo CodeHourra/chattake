@@ -258,7 +258,7 @@ fn run_distill_pipeline(
 
     // 用闭包包裹后续逻辑，确保任何真正失败都能将状态回退为 error
     let result = (|| -> Result<DistillSessionResult, String> {
-        let init_params = config.sidecar_init_params()?;
+        let init_params = config.sidecar_init_params(None)?;
 
         sidecar
             .call_with_timeout::<serde_json::Value>(

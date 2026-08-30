@@ -13,11 +13,15 @@
  */
 
 import { startRpcServer, type Handler } from './rpc'
-import { handleInit, handleJudgeValue, handleDistillFull } from './distiller'
+import {
+  handleInit, handleJudgeValue, handleDistillFull, handleListModels, handleTestProvider,
+} from './distiller'
 
 const handlers: Record<string, Handler> = {
   ping: async () => ({ status: 'ok', version: '0.1.0' }),
   init: handleInit,
+  list_models: handleListModels,
+  test_provider: handleTestProvider,
   judge_value: handleJudgeValue,
   distill_full: handleDistillFull,
 }

@@ -32,6 +32,24 @@ export interface DistillResult {
   completionTokens: number
 }
 
+export async function listApiModels(config: ApiProviderConfig): Promise<string[]> {
+  const url = new URL(`${config.baseUrl.replace(/\/$/, '')}/models`)
+  if (config.provider === 'siliconflow') {
+    url.searchParams.set('type', 'text')
+    url.searchParams.set('sub_type', 'chat')
+  }
+  const response = await fetch(url, {
+    headers: { Authorization: `Bearer ${config.apiKey}` },
+    signal: AbortSignal.timeout(config.timeoutMs ?? 30_000),
+  })
+  if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`)
+  const body = await response.json() as { data?: Array<{ id?: unknown }> }
+  return (body.data ?? [])
+    .map((item) => typeof item.id === 'string' ? item.id : '')
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b))
+}
+
 export class ApiProvider {
   private client: OpenAI
   private model: string
@@ -108,6 +126,14 @@ export class ApiProvider {
     } catch {
       return false
     }
+  }
+
+  async testConnection(): Promise<void> {
+    await this.client.chat.completions.create({
+      model: this.model,
+      messages: [{ role: 'user', content: 'ping' }],
+      max_tokens: 1,
+    })
   }
 
   getInfo() {

@@ -205,36 +205,18 @@ export interface AppConfigDto {
 }
 
 export interface DistillerConfigDto {
-  /** 提炼模式: "api" | "cli" */
-  mode: string
-  api: ApiConfigDto | null
-  cli: CliConfigDto | null
+  activeProfileId: string
+  profiles: ApiProfileDto[]
 }
 
-export interface ApiConfigDto {
-  /** 提供商标识（如 "openai"、"deepseek"、"openai-compatible"） */
-  provider: string
-  /** API Base URL（可选） */
-  baseUrl: string | null
-  /** API 密钥 */
-  apiKey: string
-  /** 模型名称 */
-  model: string
-  /** 请求超时（秒） */
-  timeoutSecs: number
-}
-
-export interface CliConfigDto {
-  /** CLI 命令名或可执行文件绝对路径 */
-  command: string
-  /** 附加参数 */
-  extraArgs: string[]
-}
-
-/** `probe_cli_tools` 返回：候选名与登录 shell 下解析到的绝对路径 */
-export interface CliProbeResult {
+export interface ApiProfileDto {
+  id: string
   name: string
-  resolvedPath: string | null
+  provider: string
+  baseUrl: string
+  apiKey: string
+  model: string
+  timeoutSecs: number
 }
 
 export interface CollectorConfigDto {
@@ -249,6 +231,5 @@ export interface SourceConfigDto {
 }
 
 export interface SyncConfigDto {
-  mode: string
-  intervalSecs: number
+  scanOnStartup: boolean
 }

@@ -7,9 +7,9 @@
 import { invoke } from '@tauri-apps/api/core'
 import type {
   AppConfigDto,
+  ApiProfileDto,
   Card,
   CardSummary,
-  CliProbeResult,
   DistillSessionResult,
   ListCardsParams,
   Message,
@@ -120,11 +120,13 @@ export const api = {
   /** 保存应用配置（写磁盘 + 热更新内存） */
   saveConfig: (config: AppConfigDto) => invoke<void>('save_config', { config }),
 
-  /**
-   * 在登录 shell 环境下探测常见 AI CLI 的绝对路径（与终端 `command -v` 一致）。
-   * 用于设置页「自动检测」，避免用户手填路径。
-   */
-  probeCliTools: () => invoke<CliProbeResult[]>('probe_cli_tools'),
+  /** 临时加载供应商模型列表；结果不持久化。 */
+  listProviderModels: (profile: ApiProfileDto) =>
+    invoke<string[]>('list_provider_models', { profile }),
+
+  /** 优先测试模型列表；不支持时发送最小 Chat Completions 请求。 */
+  testProvider: (profile: ApiProfileDto) =>
+    invoke<string>('test_provider', { profile }),
 
   /** 单条笔记导出为 Markdown（路径由系统「另存为」决定） */
   exportCardMarkdown: (cardId: string, filePath: string) =>
