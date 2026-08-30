@@ -29,7 +29,7 @@ const store = new XunjiStore(path)
 afterAll(() => { store.close(); rmSync(dir, { recursive: true, force: true }) })
 
 test('四类只读查询仅暴露已发布知识', () => {
-  expect(store.search('超时', { technologies: ['rust'] })).toHaveLength(1)
+  expect(store.search('超时', { technologies: ['rust'] })).toMatchObject([{ topics: ['性能'], technologies: ['Rust'] }])
   expect(store.search('草稿')).toHaveLength(0)
   expect(store.getCard('draft')).toBeNull()
   expect(store.listFacets()).toEqual({ types: [{ name: 'troubleshooting', count: 1 }], topics: [{ name: '性能', count: 1 }], technologies: [{ name: 'Rust', count: 1 }] })

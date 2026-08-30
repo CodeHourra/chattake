@@ -5,6 +5,28 @@
 
 ---
 
+## 0.2.0（2026-08-30）
+
+### 架构与数据
+
+- Schema v7：`sessions/messages/cards/tags/card_tags/jobs/job_items/analysis_runs/cards_fts`；升级前强制 `VACUUM INTO` 备份。
+- 四采集器统一标准会话输出；文件 `mtime + size` 预判，变化后以内容哈希确认；Codex 去除内部事件和重复事件。
+- `jobs/job_items` 持久化同步与分析任务；任务保存供应商配置快照，不保存 API Key；异常退出标记 `interrupted`。
+
+### 分析与检索
+
+- Sidecar 使用 24,000 字符首尾保留/中段轮次采样；`judge_value` 与 `extract_knowledge` 两阶段协议。
+- 固定五类知识；高价值发布、中价值草稿、低价值只记录判断；重新分析保护旧卡片。
+- FTS5 trigram + 短词参数化 `LIKE`；标签重命名/合并会事务化重建受影响索引。
+
+### 桌面与 MCP
+
+- Light/Dark Token、结构性液态玻璃、四来源品牌资产、真实任务中心、消息游标分页和懒加载；单生产 Chunk 低于 500 KB。
+- `@modelcontextprotocol/server` v2 + `serveStdio`；四个工具只读访问已发布知识，stdout 仅承载 JSON-RPC。
+- 构建资源同时包含 `xunji-sidecar` 与 `xunji-mcp`。
+
+---
+
 ## 0.1.7（2026-03-26）
 
 ### 构建与文档

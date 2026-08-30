@@ -2,7 +2,7 @@
  * Distiller 模块入口 —— 组装前处理器 + OpenAI-compatible API + Prompt 模板，
  * 导出 JSON-RPC handler 供 index.ts 注册使用。
  *
- * v0.2 仅支持 HTTP API；不再保留 CLI Provider。
+ * v0.2 仅支持 HTTP API。
  */
 
 import { createHash } from 'node:crypto'

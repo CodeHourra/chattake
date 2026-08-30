@@ -23,6 +23,14 @@ function likePattern(value: string) {
   return `%${value.replaceAll('\\', '\\\\').replaceAll('%', '\\%').replaceAll('_', '\\_')}%`
 }
 
+function labelsAsArrays(row: Record<string, unknown> | null) {
+  if (!row) return null
+  for (const key of ['topics', 'technologies']) {
+    row[key] = JSON.parse(String(row[key] || '[]'))
+  }
+  return row
+}
+
 export function defaultDatabasePath() {
   return process.env.XUNJI_DB || join(homedir(), '.xunji', 'db', 'xunji.db')
 }
@@ -51,13 +59,13 @@ export class XunjiStore {
       ? `${common},snippet(cards_fts,-1,'<mark>','</mark>','…',24) match_snippet FROM cards c JOIN sessions s ON s.id=c.session_id JOIN cards_fts ON cards_fts.rowid=c.rowid WHERE cards_fts MATCH ? AND ${where} ORDER BY bm25(cards_fts) LIMIT ?`
       : `${common},substr(c.title||char(10)||c.summary||char(10)||c.note,1,360) match_snippet FROM cards c JOIN sessions s ON s.id=c.session_id WHERE lower(c.title||char(10)||c.summary||char(10)||c.note||char(10)||${topics}||char(10)||${technologies}) LIKE lower(?) ESCAPE '\\' AND ${where} ORDER BY c.updated_at DESC LIMIT ?`
     const first = fts ? `"${text.replaceAll('"', '""')}"` : likePattern(text)
-    return this.db.query(sql).all(first, ...params, limit)
+    return (this.db.query(sql).all(first, ...params, limit) as Record<string, unknown>[]).map((row) => labelsAsArrays(row))
   }
 
   getCard(cardId: string) {
     const topics = labelSql('topic')
     const technologies = labelSql('technology')
-    return this.db.query(`SELECT c.id,c.title,c.type,c.value,c.summary,c.note,c.source_name,c.project_name,c.created_at,c.updated_at,s.source_id,s.external_session_id,${topics} topics,${technologies} technologies FROM cards c JOIN sessions s ON s.id=c.session_id WHERE c.id=? AND c.publication_status='published'`).get(cardId)
+    return labelsAsArrays(this.db.query(`SELECT c.id,c.title,c.type,c.value,c.summary,c.note,c.source_name,c.project_name,c.created_at,c.updated_at,s.source_id,s.external_session_id,${topics} topics,${technologies} technologies FROM cards c JOIN sessions s ON s.id=c.session_id WHERE c.id=? AND c.publication_status='published'`).get(cardId) as Record<string, unknown> | null)
   }
 
   listFacets() {

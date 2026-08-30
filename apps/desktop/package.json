@@ -1,12 +1,12 @@
 {
   "name": "@xunji/desktop",
   "private": true,
-  "version": "0.1.7",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
-    "build:tauri": "cd ../.. && npm run sync:changelog && cd packages/sidecar && bun run build && cd ../../apps/desktop && vue-tsc --noEmit && vite build",
+    "build:tauri": "cd ../.. && bun run sync:changelog && bun run --cwd packages/sidecar build && bun run --cwd packages/mcp-server build && bun run --cwd apps/desktop build",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:build": "env -u CI tauri build"

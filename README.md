@@ -4,15 +4,17 @@
 
 ## 简介
 
-寻迹自动采集你与 AI 编程助手（Claude Code、Cursor 等）的对话记录，通过 LLM 提炼出有价值的技术笔记、最佳实践和编程技巧，构建个人知识库。
+寻迹增量采集 Claude Code、Cursor、Codex、CodeBuddy 的本地对话，经用户确认后通过指定 API 配置提取原子知识，并提供草稿治理、全文检索和只读 MCP 回溯。
+
+v0.2.0 采用固定的五类知识（决策、排障、实现、解释、片段）与开放标签，避免 AI 无限生成分类。高价值知识自动发布，中价值进入草稿，重新分析不会覆盖旧知识。
 
 ## 技术栈
 
 - **桌面框架**: Tauri 2.0
-- **前端**: Vue 3 + TypeScript + UnoCSS + Radix Vue + Pinia
+- **前端**: Vue 3 + TypeScript + UnoCSS + Naive UI + Pinia
 - **后端**: Rust (rusqlite, serde, tokio)
 - **LLM Sidecar**: TypeScript + Bun (OpenAI-compatible API)
-- **MCP Server**: TypeScript + Bun (stdio transport)
+- **MCP Server**: 官方 TypeScript SDK v2 + Bun（只读 stdio）
 
 ## 项目结构
 
@@ -34,19 +36,30 @@ xunji/
 
 ```bash
 # 安装依赖
-npm install
+bun install
 
 # 更新日志：编辑根目录 CHANGELOG.md 后同步到关于页数据源（构建 tauri 前也会自动执行）
-npm run sync:changelog
+bun run sync:changelog
 
 # 启动开发模式
-cd apps/desktop
-npm run tauri dev
+bun --cwd apps/desktop run tauri dev
 
-# 构建 sidecar
-cd packages/sidecar
-bun build src/index.ts --compile --outfile dist/xunji-sidecar
+# 验证 Sidecar、MCP、Rust 与前端
+bun run verify
+
+# 统一 debug 构建（先编译伴随程序、运行 Rust 测试，再执行 Tauri）
+bun run build:debug
 ```
+
+## 配置
+
+配置默认保存到 `~/.xunji/config.toml`。可同时保存 OpenAI、DeepSeek、Moonshot、智谱、硅基流动和自定义 OpenAI-compatible 配置，但每个分析任务只绑定启动时选择的一套配置，不自动跨供应商切换。完整示例见 [`docs/config.example.toml`](docs/config.example.toml)。
+
+首次运行 v0.2.0 时，如果检测到旧 Schema，会先通过 SQLite `VACUUM INTO` 备份到 `~/.xunji/db/backups/`，备份成功后才重建数据库。
+
+## MCP
+
+先执行 `bun run build:companions`，然后在应用「设置 → MCP」复制配置片段。`xunji-mcp` 只读取已发布知识；草稿、任务、API Key 和供应商配置不会通过 MCP 返回。
 
 ## 许可证
 

@@ -1,11 +1,12 @@
 {
   "name": "@xunji/sidecar",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "bun run src/index.ts",
-    "build": "bun build src/index.ts --compile --outfile dist/xunji-sidecar"
+    "build": "bun build src/index.ts --compile --outfile dist/xunji-sidecar",
+    "test": "bun test"
   },
   "dependencies": {
     "@xunji/shared": "workspace:*",
