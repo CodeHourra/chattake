@@ -12,6 +12,7 @@
 
 mod cards;
 pub mod db;
+mod jobs;
 mod migrations;
 pub mod models;
 mod search;

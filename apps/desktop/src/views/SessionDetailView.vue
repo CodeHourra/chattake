@@ -97,44 +97,16 @@ async function onExportMarkdown() {
   }
 }
 
-function analyze() {
+async function analyze() {
   analyzeError.value = null
   if (session.value) session.value.status = 'analyzing'
-  const title =
-    session.value?.analysisTitle
-    ?? session.value?.projectName
-    ?? session.value?.projectPath
-    ?? props.sessionId
-  queue.enqueue(props.sessionId, title, {
-    onLowValue: (result) => {
-      if (session.value) {
-        session.value.status = 'analyzed'
-        session.value.value = result.value
-      }
-      card.value = null
-      analyzeError.value = `已判断为${result.value === 'none' ? '无价值' : '低价值'}：${result.reason ?? ''}`
-      void router.replace({
-        name: 'session-detail',
-        params: { sessionId: props.sessionId },
-      })
-    },
-    onSuccess: (result) => {
-      card.value = result.card
-      mode.value = 'note'
-      if (session.value) {
-        session.value.status = 'analyzed'
-        session.value.value = result.value
-      }
-      void router.replace({
-        name: 'session-detail',
-        params: { sessionId: props.sessionId },
-        query: result.card ? { cardId: result.card.id } : {},
-      })
-    },
-    onError: (msg) => {
-      analyzeError.value = appendDistillHint(msg)
-    },
-  })
+  try {
+    await queue.startAnalysis([props.sessionId])
+    analyzeError.value = '分析任务已创建；完成后可从对话列表打开生成的知识项。'
+  } catch (error) {
+    analyzeError.value = appendDistillHint(error instanceof Error ? error.message : String(error))
+    if (session.value) session.value.status = 'error'
+  }
 }
 
 // ────────────── 会话元数据展示 ──────────────

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import {
   NTooltip,
   NButton,
@@ -10,16 +10,14 @@ import {
 import type { DropdownOption } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useUiStore } from '../stores/ui'
-import { useSessionsStore } from '../stores/sessions'
-import { useSidebarStore } from '../stores/sidebar'
+import { useAnalysisQueueStore } from '../stores/analysisQueue'
 import { api } from '../lib/tauri'
 import { exportAllCardsToDir } from '../lib/cardExport'
 import SettingsModal from './SettingsModal.vue'
 import AppUpdateModal from './AppUpdateModal.vue'
 
 const ui = useUiStore()
-const sessions = useSessionsStore()
-const sidebar = useSidebarStore()
+const queue = useAnalysisQueueStore()
 const router = useRouter()
 const message = useMessage()
 const dialog = useDialog()
@@ -27,6 +25,7 @@ const dialog = useDialog()
 const showSettings = ref(false)
 /** 独立「软件更新」弹窗（与设置解耦） */
 const showAppUpdate = ref(false)
+const syncing = computed(() => queue.jobs.some((job) => job.kind === 'sync' && ['queued', 'running'].includes(job.status)))
 
 /** 顶栏「导出」下拉：与知识库页能力对齐 */
 const exportDropdownOptions: DropdownOption[] = [
@@ -75,12 +74,8 @@ function onTabChange(tab: 'sessions' | 'library') {
 
 async function onSync() {
   try {
-    const r = await sessions.syncAll()
-    void sidebar.loadSessionGroups()
-    message.success(
-      `同步完成：发现 ${r.found}，新增 ${r.new}，更新 ${r.updated}，跳过 ${r.skipped}`,
-      { duration: 5000 },
-    )
+    await queue.startSync()
+    message.success('同步任务已创建，可在任务中心查看文件级进度')
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     message.error(msg, { duration: 12000, closable: true })
@@ -148,13 +143,13 @@ async function onSync() {
         size="small"
         secondary
         class="rounded-md"
-        :loading="sessions.syncing"
-        :disabled="sessions.syncing"
+        :loading="syncing"
+        :disabled="syncing"
         @click="onSync"
       >
         <span class="inline-flex items-center gap-1.5">
-          <span v-if="!sessions.syncing" class="i-lucide-refresh-cw w-3.5 h-3.5" />
-          {{ sessions.syncing ? '同步中…' : '同步' }}
+          <span v-if="!syncing" class="i-lucide-refresh-cw w-3.5 h-3.5" />
+          {{ syncing ? '同步中…' : '同步' }}
         </span>
       </n-button>
 

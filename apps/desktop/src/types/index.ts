@@ -2,31 +2,40 @@
  * 与 Rust Tauri 返回值对应的 TypeScript 类型（字段名使用 camelCase，与 serde 配置一致）
  */
 
-export interface SyncResult {
-  found: number
-  new: number
-  updated: number
-  skipped: number
+export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'
+
+export interface JobItem {
+  id: string
+  jobId: string
+  sessionId: string | null
+  sourceId: string | null
+  rawPath: string | null
+  status: JobStatus
+  phase: string
+  durationMs: number | null
+  error: string | null
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
 }
 
-/**
- * distill_session 返回结果。
- *
- * - isLowValue = true：价值为 low / none，已更新 DB，无卡片产出
- * - isLowValue = false：已生成笔记卡片，card 有值
- */
-export interface DistillSessionResult {
-  /** 本次分析 trace，与终端 sidecar / Rust 日志一致，grep 此 id 可串联全流程 */
-  traceId: string
-  value: string
-  isLowValue: boolean
-  /** 低/无价值时：由 reason 截取的简短标题 */
-  cardTitle: string | null
-  /** 低/无价值时：judge_value 返回的对话类型（英文枚举，展示用 @xunji/shared getCardTypeLabel） */
-  cardType: string | null
-  /** 低/无价值时的原因说明（作为摘要展示） */
-  reason: string | null
-  card: Card | null
+export interface Job {
+  id: string
+  kind: 'sync' | 'analysis'
+  status: JobStatus
+  phase: string
+  done: number
+  total: number
+  cancelRequested: boolean
+  error: string | null
+  providerProfileId: string | null
+  provider: string | null
+  baseUrl: string | null
+  model: string | null
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+  items: JobItem[]
 }
 
 export interface PaginatedResult<T> {

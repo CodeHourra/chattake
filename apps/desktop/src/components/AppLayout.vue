@@ -5,10 +5,13 @@ import TopBar from './TopBar.vue'
 import Sidebar from './Sidebar.vue'
 import AnalysisQueuePanel from './AnalysisQueuePanel.vue'
 import { api } from '../lib/tauri'
+import { useAnalysisQueueStore } from '../stores/analysisQueue'
 
 const message = useMessage()
+const queue = useAnalysisQueueStore()
 
 onMounted(async () => {
+  await queue.initialize()
   const path = await api.getDatabaseBackupPath().catch(() => null)
   if (path) message.warning(`v0.2 数据库已重建，旧库备份位于：${path}`, { duration: 0, closable: true })
 })

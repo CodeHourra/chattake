@@ -7,6 +7,7 @@ mod sidecar;
 mod storage;
 
 use std::sync::{Arc, RwLock};
+use tauri::Manager;
 
 use config::AppConfig;
 use sidecar::SidecarManager;
@@ -23,6 +24,7 @@ pub struct AppState {
     pub db: Arc<Database>,
     pub config: Arc<RwLock<AppConfig>>,
     pub sidecar: Option<Arc<SidecarManager>>,
+    pub job_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AppState {
@@ -58,6 +60,9 @@ pub fn run() {
     if let Err(e) = db.reset_stale_analyzing() {
         log::error!("清理残留 analyzing 状态失败: {}", e);
     }
+    if let Err(e) = db.interrupt_running_jobs() {
+        log::error!("恢复中断任务状态失败: {}", e);
+    }
 
     let context = tauri::generate_context!();
 
@@ -72,6 +77,7 @@ pub fn run() {
         db: Arc::new(db),
         config: Arc::new(RwLock::new(config)),
         sidecar,
+        job_lock: Arc::new(tokio::sync::Mutex::new(())),
     };
 
     tauri::Builder::default()
@@ -79,14 +85,34 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state)
+        .setup(|app| {
+            let state = app.state::<AppState>();
+            if state.config_snapshot().sync.scan_on_startup {
+                if let Err(error) = commands::jobs::start_sync_internal(
+                    app.handle().clone(),
+                    state.db.clone(),
+                    state.config_snapshot(),
+                    state.sidecar.clone(),
+                    state.job_lock.clone(),
+                    None,
+                ) {
+                    log::error!("启动扫描任务创建失败: {}", error);
+                }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
-            commands::sync::sync_all,
+            commands::jobs::start_sync,
+            commands::jobs::start_analysis,
+            commands::jobs::list_jobs,
+            commands::jobs::get_job,
+            commands::jobs::cancel_job,
+            commands::jobs::retry_job_item,
             commands::sessions::list_sessions,
             commands::sessions::count_sessions_by_filter_groups,
             commands::sessions::delete_sessions_by_filter_groups,
             commands::sessions::get_session,
             commands::sessions::get_session_messages,
-            commands::sessions::distill_session,
             commands::cards::search_cards,
             commands::cards::list_cards,
             commands::cards::get_card,

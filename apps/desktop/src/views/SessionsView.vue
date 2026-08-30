@@ -16,36 +16,8 @@ const router = useRouter()
 const search = useSearchStore()
 const queue = useAnalysisQueueStore()
 
-// ── 批量分析完成统计（仅批量入口使用 callbacks 计数） ───────────────────────
-
-const batchExpected = ref(0)
-const batchFinished = ref(0)
-const batchSuccess = ref(0)
-const batchFail = ref(0)
-
 /** 知识库卡片总数：用于区分「无笔记可搜」与「关键词无匹配」 */
 const libraryCardTotal = ref<number | null>(null)
-
-function resetBatchStats() {
-  batchExpected.value = 0
-  batchFinished.value = 0
-  batchSuccess.value = 0
-  batchFail.value = 0
-}
-
-function tryFinishBatchToast() {
-  if (batchExpected.value === 0) return
-  if (batchFinished.value < batchExpected.value) return
-  if (batchFail.value === 0) {
-    showToast(`批量分析完成，共处理 ${batchSuccess.value} 条`)
-  } else {
-    showToast(
-      `分析完成：成功 ${batchSuccess.value}，失败 ${batchFail.value}`,
-      batchFail.value > 0 ? 'error' : 'success',
-    )
-  }
-  resetBatchStats()
-}
 
 // ── 批量选择 ─────────────────────────────────────────────────────────────────
 
@@ -109,38 +81,23 @@ const indeterminate = computed(
 )
 
 // 批量分析进行中：队列里仍有来自本次批量预期的任务未完成
-const batchRunning = computed(
-  () => batchExpected.value > 0 && batchFinished.value < batchExpected.value,
-)
+const activeAnalysisJob = computed(() => queue.jobs.find(
+  (job) => job.kind === 'analysis' && (job.status === 'queued' || job.status === 'running'),
+))
+const batchRunning = computed(() => (activeAnalysisJob.value?.total ?? 0) > 1)
+const batchFinished = computed(() => activeAnalysisJob.value?.done ?? 0)
+const batchExpected = computed(() => activeAnalysisJob.value?.total ?? 0)
 
 // ── 方法 ─────────────────────────────────────────────────────────────────────
 
 /** 单条分析（从 SessionCard 触发） */
-function onAnalyze(sessionId: string) {
-  const s = sessions.items.find((x) => x.id === sessionId)
-  const title = s?.cardTitle || s?.projectName || sessionId
-  queue.enqueue(sessionId, title, {
-    onLowValue: (result) => {
-      showToast(
-        `已判断为${result.value === 'none' ? '无价值' : '低价值'}：${result.reason ?? ''}`,
-        'warning',
-      )
-    },
-    onSuccess: (result) => {
-      const card = result.card
-      if (card) {
-        showToast(`笔记已生成：${card.title}`)
-        void router.push({
-          name: 'session-detail',
-          params: { sessionId },
-          query: { cardId: card.id },
-        })
-      }
-    },
-    onError: (msg) => {
-      showToast(msg, 'error')
-    },
-  })
+async function onAnalyze(sessionId: string) {
+  try {
+    await queue.startAnalysis([sessionId])
+    showToast('分析任务已创建，可在任务中心查看阶段和进度')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : String(error), 'error')
+  }
 }
 
 function toggleBatchMode() {
@@ -171,37 +128,18 @@ function onSelectionChange(id: string, checked: boolean) {
 /**
  * 批量分析：全部入队，由全局队列串行执行；通过 callbacks 统计完成后 Toast
  */
-function startBatchAnalyze() {
+async function startBatchAnalyze() {
   const ids = [...selectedIds.value]
   if (!ids.length) return
 
-  resetBatchStats()
-
-  ids.forEach((id) => {
-    const s = sessions.items.find((x) => x.id === id)
-    const title = s?.cardTitle || s?.projectName || id
-    const enqueued = queue.enqueue(id, title, {
-      onLowValue: () => {
-        batchSuccess.value++
-        batchFinished.value++
-        tryFinishBatchToast()
-      },
-      onSuccess: () => {
-        batchSuccess.value++
-        batchFinished.value++
-        tryFinishBatchToast()
-      },
-      onError: () => {
-        batchFail.value++
-        batchFinished.value++
-        tryFinishBatchToast()
-      },
-    })
-    if (enqueued) batchExpected.value++
-  })
-
-  batchMode.value = false
-  selectedIds.value = new Set()
+  try {
+    await queue.startAnalysis(ids)
+    showToast(`已创建批量分析任务，共 ${ids.length} 条`)
+    batchMode.value = false
+    selectedIds.value = new Set()
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : String(error), 'error')
+  }
 }
 
 function openSearchHit(cardId: string, sessionId: string) {
@@ -298,7 +236,7 @@ function openSearchHit(cardId: string, sessionId: string) {
       <div v-else-if="!sessions.items.length" class="flex-1 flex items-center justify-center">
         <n-empty description="暂无会话，请先同步">
           <template #extra>
-            <n-button type="primary" @click="sessions.syncAll()">
+            <n-button type="primary" @click="queue.startSync()">
               <span class="inline-flex items-center gap-1.5">
                 <span class="i-lucide-refresh-cw w-3.5 h-3.5" />
                 立即同步

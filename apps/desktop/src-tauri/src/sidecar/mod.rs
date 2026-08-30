@@ -230,16 +230,20 @@ impl SidecarManager {
             self.start()?;
         }
 
-        let client_guard = self
-            .client
-            .lock()
-            .map_err(|_| RpcError::Internal("client lock poisoned".into()))?;
-
-        let client = client_guard
-            .as_ref()
-            .ok_or_else(|| RpcError::Internal("RPC 客户端未就绪".into()))?;
-
-        client.call_with_timeout(method, params, timeout)
+        let result = {
+            let client_guard = self
+                .client
+                .lock()
+                .map_err(|_| RpcError::Internal("client lock poisoned".into()))?;
+            let client = client_guard
+                .as_ref()
+                .ok_or_else(|| RpcError::Internal("RPC 客户端未就绪".into()))?;
+            client.call_with_timeout(method, params, timeout)
+        };
+        if matches!(result, Err(RpcError::Timeout(_))) {
+            let _ = self.stop();
+        }
+        result
     }
 }
 

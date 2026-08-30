@@ -304,6 +304,51 @@ pub struct TypeCount {
     pub count: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JobItem {
+    pub id: String,
+    pub job_id: String,
+    pub session_id: Option<String>,
+    pub source_id: Option<String>,
+    pub raw_path: Option<String>,
+    pub status: String,
+    pub phase: String,
+    pub duration_ms: Option<i64>,
+    pub error: Option<String>,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Job {
+    pub id: String,
+    pub kind: String,
+    pub status: String,
+    pub phase: String,
+    pub done: i64,
+    pub total: i64,
+    pub cancel_requested: bool,
+    pub error: Option<String>,
+    pub provider_profile_id: Option<String>,
+    pub provider: Option<String>,
+    pub base_url: Option<String>,
+    pub model: Option<String>,
+    pub created_at: String,
+    pub started_at: Option<String>,
+    pub finished_at: Option<String>,
+    #[serde(default)]
+    pub items: Vec<JobItem>,
+}
+
+pub struct NewJobItem<'a> {
+    pub session_id: Option<&'a str>,
+    pub source_id: Option<&'a str>,
+    pub raw_path: Option<&'a str>,
+}
+
 /// 知识卡片筛选条件
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CardFilters {

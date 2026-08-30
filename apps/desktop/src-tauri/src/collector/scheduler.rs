@@ -51,90 +51,66 @@ impl<'a> CollectorScheduler<'a> {
         Self { config, db }
     }
 
-    /// 执行全量采集：遍历所有启用的数据源，采集 → 去重 → 写入
-    pub fn collect_all(&self) -> SyncResult {
-        let mut total_result = SyncResult::default();
-
-        let enabled_ids: Vec<&str> = self
+    pub fn collect_source(&self, source_id: &str) -> SyncResult {
+        let Some(source) = self
             .config
             .enabled_sources()
-            .iter()
-            .map(|s| s.id.as_str())
-            .collect();
+            .into_iter()
+            .find(|source| source.id == source_id)
+        else {
+            return SyncResult::default();
+        };
+        log::info!("开始采集数据源: {} ({})", source.name, source.id);
+        let scan_dirs = source.resolved_scan_dirs();
+        let sessions: Vec<NormalizedSession> = match source.id.as_str() {
+            "claude-code" => {
+                let collector = ClaudeCodeCollector::new(scan_dirs);
+                collector.collect_changed(|path, mtime, size| {
+                    self.db
+                        .source_file_unchanged(&source.id, path, mtime, size)
+                        .unwrap_or(false)
+                })
+            }
+            "cursor" => {
+                let collector = CursorCollector::new(scan_dirs);
+                collector.collect_changed(|path, mtime, size| {
+                    self.db
+                        .source_file_unchanged(&source.id, path, mtime, size)
+                        .unwrap_or(false)
+                })
+            }
+            "codebuddy" => {
+                let collector = CodeBuddyCollector::new(scan_dirs);
+                collector.collect_changed(|path, mtime, size| {
+                    self.db
+                        .source_file_unchanged(&source.id, path, mtime, size)
+                        .unwrap_or(false)
+                })
+            }
+            "codex" => {
+                let collector = CodexCollector::new(scan_dirs);
+                collector.collect_changed(|path, mtime, size| {
+                    self.db
+                        .source_file_unchanged(&source.id, path, mtime, size)
+                        .unwrap_or(false)
+                })
+            }
+            other => {
+                log::warn!("未知数据源类型: {}", other);
+                return SyncResult::default();
+            }
+        };
+
+        let result = self.dedup_and_write(&source.id, &sessions);
         log::info!(
-            "本次同步将采集的数据源 id 列表（仅已启用）: {:?}；未在列表中的数据源不会扫描",
-            enabled_ids
+            "数据源 {} 采集完成: 发现={}, 新增={}, 更新={}, 跳过={}",
+            source.name,
+            result.found,
+            result.new,
+            result.updated,
+            result.skipped
         );
-
-        for source in self.config.enabled_sources() {
-            log::info!("开始采集数据源: {} ({})", source.name, source.id);
-            let scan_dirs = source.resolved_scan_dirs();
-
-            let sessions: Vec<NormalizedSession> = match source.id.as_str() {
-                "claude-code" => {
-                    let collector = ClaudeCodeCollector::new(scan_dirs);
-                    collector.collect_changed(|path, mtime, size| {
-                        self.db
-                            .source_file_unchanged(&source.id, path, mtime, size)
-                            .unwrap_or(false)
-                    })
-                }
-                "cursor" => {
-                    let collector = CursorCollector::new(scan_dirs);
-                    collector.collect_changed(|path, mtime, size| {
-                        self.db
-                            .source_file_unchanged(&source.id, path, mtime, size)
-                            .unwrap_or(false)
-                    })
-                }
-                "codebuddy" => {
-                    let collector = CodeBuddyCollector::new(scan_dirs);
-                    collector.collect_changed(|path, mtime, size| {
-                        self.db
-                            .source_file_unchanged(&source.id, path, mtime, size)
-                            .unwrap_or(false)
-                    })
-                }
-                "codex" => {
-                    let collector = CodexCollector::new(scan_dirs);
-                    collector.collect_changed(|path, mtime, size| {
-                        self.db
-                            .source_file_unchanged(&source.id, path, mtime, size)
-                            .unwrap_or(false)
-                    })
-                }
-                other => {
-                    log::warn!("未知数据源类型: {}", other);
-                    continue;
-                }
-            };
-
-            // 去重写入，并累计 sync_log
-            let source_result = self.dedup_and_write(&source.id, &sessions);
-            log::info!(
-                "数据源 {} 采集完成: 发现={}, 新增={}, 更新={}, 跳过={}",
-                source.name,
-                source_result.found,
-                source_result.new,
-                source_result.updated,
-                source_result.skipped
-            );
-
-            total_result.found += source_result.found;
-            total_result.new += source_result.new;
-            total_result.updated += source_result.updated;
-            total_result.skipped += source_result.skipped;
-        }
-
-        log::info!(
-            "全量采集完成: 发现={}, 新增={}, 更新={}, 跳过={}",
-            total_result.found,
-            total_result.new,
-            total_result.updated,
-            total_result.skipped
-        );
-
-        total_result
+        result
     }
 
     /// 对采集到的会话逐条去重写入。

@@ -10,9 +10,9 @@ import type {
   ApiProfileDto,
   Card,
   CardSummary,
-  DistillSessionResult,
   ListCardsParams,
   Message,
+  Job,
   PaginatedResult,
   SearchCardsParams,
   Session,
@@ -20,14 +20,19 @@ import type {
   SessionListParams,
   SessionFilterPayload,
   SessionSummary,
-  SyncResult,
   TagCount,
   TypeCount,
 } from '../types'
 
 export const api = {
-  /** 全量采集 */
-  syncAll: () => invoke<SyncResult>('sync_all'),
+  startSync: (scope?: string | null) => invoke<Job>('start_sync', { scope: scope ?? null }),
+  startAnalysis: (sessionIds: string[], providerProfileId?: string | null) =>
+    invoke<Job>('start_analysis', { sessionIds, providerProfileId: providerProfileId ?? null }),
+  listJobs: (activeOnly = false) => invoke<Job[]>('list_jobs', { activeOnly }),
+  getJob: (jobId: string) => invoke<Job>('get_job', { jobId }),
+  cancelJob: (jobId: string) => invoke<Job>('cancel_job', { jobId }),
+  retryJobItem: (jobId: string, itemId: string, providerProfileId?: string | null) =>
+    invoke<Job>('retry_job_item', { jobId, itemId, providerProfileId: providerProfileId ?? null }),
 
   /** 分页查询会话列表 */
   listSessions: (params: SessionListParams) =>
@@ -74,10 +79,6 @@ export const api = {
   /** 获取会话所有消息（对话回放用） */
   getSessionMessages: (sessionId: string) =>
     invoke<Message[]>('get_session_messages', { sessionId }),
-
-  /** 提炼会话 → 价值判断 + 可选笔记生成 */
-  distillSession: (sessionId: string) =>
-    invoke<DistillSessionResult>('distill_session', { sessionId }),
 
   /** FTS5 全文搜索卡片 */
   searchCards: (params: SearchCardsParams) =>

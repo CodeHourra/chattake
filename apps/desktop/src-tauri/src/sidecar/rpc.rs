@@ -8,7 +8,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::process::{ChildStdin, ChildStdout};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{mpsc, Mutex};
 use std::time::Duration;
 
 use serde::de::DeserializeOwned;
@@ -20,7 +20,7 @@ const DEFAULT_TIMEOUT_SECS: u64 = 120;
 /// JSON-RPC 2.0 客户端，持有 sidecar 进程的 stdin/stdout
 pub struct RpcClient {
     stdin: Mutex<ChildStdin>,
-    stdout: Mutex<BufReader<ChildStdout>>,
+    responses: Mutex<mpsc::Receiver<Result<String, String>>>,
     request_id: AtomicU64,
     /// RPC 调用默认超时时间
     timeout: Duration,
@@ -28,9 +28,31 @@ pub struct RpcClient {
 
 impl RpcClient {
     pub fn new(stdin: ChildStdin, stdout: ChildStdout) -> Self {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            loop {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) => {
+                        let _ = tx.send(Err("Sidecar stdout 已关闭".into()));
+                        break;
+                    }
+                    Ok(_) => {
+                        if tx.send(Ok(line)).is_err() {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = tx.send(Err(error.to_string()));
+                        break;
+                    }
+                }
+            }
+        });
         Self {
             stdin: Mutex::new(stdin),
-            stdout: Mutex::new(BufReader::new(stdout)),
+            responses: Mutex::new(rx),
             request_id: AtomicU64::new(1),
             timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
         }
@@ -122,44 +144,20 @@ impl RpcClient {
 
     /// 带超时的 stdout 读取。
     ///
-    /// 实现方式：scoped thread 内阻塞读取 + channel recv_timeout。
-    /// `std::thread::scope` 保证子线程在作用域内结束，无需 unsafe。
+    /// stdout 由常驻读取线程持有；当前线程只在 channel 上等待，因此超时会立即返回。
     fn read_response_with_timeout(&self, timeout: Duration) -> Result<String, RpcError> {
-        let mut stdout = self
-            .stdout
+        let responses = self
+            .responses
             .lock()
-            .map_err(|_| RpcError::Internal("stdout lock poisoned".into()))?;
-
-        let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
-
-        // scoped thread 可以安全借用栈上的 MutexGuard
-        std::thread::scope(|s| {
-            let reader = &mut *stdout;
-            s.spawn(move || {
-                let mut line = String::new();
-                match reader.read_line(&mut line) {
-                    Ok(_) => {
-                        let _ = tx.send(Ok(line));
-                    }
-                    Err(e) => {
-                        let _ = tx.send(Err(e.to_string()));
-                    }
-                }
-            });
-
-            // 在 scope 内等待结果（带超时）
-            // scope 结束时会自动 join 子线程
-            match rx.recv_timeout(timeout) {
-                Ok(Ok(line)) => Ok(line),
-                Ok(Err(e)) => Err(RpcError::Io(e)),
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    Err(RpcError::Timeout(timeout.as_secs()))
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    Err(RpcError::Io("读取线程异常退出".into()))
-                }
+            .map_err(|_| RpcError::Internal("response lock poisoned".into()))?;
+        match responses.recv_timeout(timeout) {
+            Ok(Ok(line)) => Ok(line),
+            Ok(Err(error)) => Err(RpcError::Io(error)),
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(RpcError::Timeout(timeout.as_secs())),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                Err(RpcError::Io("读取线程异常退出".into()))
             }
-        })
+        }
     }
 }
 

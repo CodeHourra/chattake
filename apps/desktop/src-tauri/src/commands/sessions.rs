@@ -1,7 +1,7 @@
 //! 会话列表 / 详情 / 提炼（Sidecar + DB）命令。
 //!
 //! ```text
-//! distill_session (spawn_blocking)
+//! 会话查询与后台分析流水线
 //!   ├── 读 Session + Messages → 拼接 content（仅 user / assistant，排除 tool 等）
 //!   ├── RPC init → judge_value
 //!   ├── value ∈ {medium, high} → distill_full → insert_card
@@ -180,28 +180,6 @@ pub struct DistillSessionResult {
     pub card: Option<Card>,
 }
 
-/// 对指定会话执行价值判断 +（可选）完整提炼，并写入 `cards` 表。
-#[tauri::command(rename_all = "camelCase")]
-pub async fn distill_session(
-    state: State<'_, AppState>,
-    session_id: String,
-) -> Result<DistillSessionResult, String> {
-    let sidecar = state.sidecar.clone().ok_or_else(|| {
-        "未找到 xunji-sidecar 可执行文件，请先构建 packages/sidecar 或安装到 ~/.xunji/bin/"
-            .to_string()
-    })?;
-
-    let db = state.db.clone();
-    // 取当前配置快照（RwLock → Clone），传入 spawn_blocking
-    let config = state.config_snapshot();
-
-    tokio::task::spawn_blocking(move || {
-        run_distill_pipeline(&db, &config, sidecar.as_ref(), &session_id)
-    })
-    .await
-    .map_err(|e| format!("distill_session join 失败: {}", e))?
-}
-
 /// 在阻塞线程内跑完 DB + Sidecar 全流程（避免阻塞 tokio worker）。
 ///
 /// 流程：
@@ -210,11 +188,14 @@ pub async fn distill_session(
 ///   ├── low / none → 更新 DB 为 analyzed + value → Ok(isLowValue=true)
 ///   └── medium / high → distill_full (PROMPT_B_FULL) → insert_card → Ok(isLowValue=false)
 /// ```
-fn run_distill_pipeline(
+pub(crate) fn run_distill_pipeline(
     db: &Database,
     config: &AppConfig,
     sidecar: &SidecarManager,
     session_db_id: &str,
+    provider_profile_id: Option<&str>,
+    initialize_provider: bool,
+    on_phase: Option<&dyn Fn(&str)>,
 ) -> Result<DistillSessionResult, String> {
     let session = db.get_session(session_db_id).map_err(|e| e.to_string())?;
     let messages = db
@@ -259,17 +240,21 @@ fn run_distill_pipeline(
 
     // 用闭包包裹后续逻辑，确保任何真正失败都能将状态回退为 error
     let result = (|| -> Result<DistillSessionResult, String> {
-        let init_params = config.sidecar_init_params(None)?;
-
-        sidecar
-            .call_with_timeout::<serde_json::Value>(
-                "init",
-                init_params,
-                std::time::Duration::from_secs(30),
-            )
-            .map_err(|e| format!("Sidecar init 失败：{}", e))?;
+        if initialize_provider {
+            let init_params = config.sidecar_init_params(provider_profile_id)?;
+            sidecar
+                .call_with_timeout::<serde_json::Value>(
+                    "init",
+                    init_params,
+                    std::time::Duration::from_secs(30),
+                )
+                .map_err(|e| format!("Sidecar init 失败：{}", e))?;
+        }
 
         // ── 第一步：轻量价值判断（PROMPT_B_LIGHT） ──
+        if let Some(callback) = on_phase {
+            callback("judging");
+        }
         let judge: JudgeValueResult = sidecar
             .call_with_timeout(
                 "judge_value",
@@ -322,6 +307,9 @@ fn run_distill_pipeline(
         }
 
         // ── 第二步：完整笔记提炼（PROMPT_B_FULL，仅 medium / high） ──
+        if let Some(callback) = on_phase {
+            callback("extracting");
+        }
         let full: DistillFullResult = sidecar
             .call_with_timeout(
                 "distill_full",
