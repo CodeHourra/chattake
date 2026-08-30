@@ -7,7 +7,7 @@
 
 import OpenAI from 'openai'
 import { logOutgoingOpenAiChat } from './payload-log'
-import { CONTENT_HINT_API } from './prompts'
+import { CONTENT_HINT } from './prompts'
 import { distillLog } from './trace'
 
 export interface ApiProviderConfig {
@@ -78,7 +78,7 @@ export class ApiProvider {
     callLabel: string = 'distill',
     traceId: string = 'unknown',
   ): Promise<DistillResult> {
-    const systemFull = systemPrompt + CONTENT_HINT_API
+    const systemFull = systemPrompt + CONTENT_HINT
     logOutgoingOpenAiChat({
       traceId,
       callLabel,

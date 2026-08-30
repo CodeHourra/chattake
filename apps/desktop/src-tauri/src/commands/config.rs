@@ -5,7 +5,7 @@ use std::time::Duration;
 use tauri::State;
 
 use crate::config::{
-    ApiProfile, AppConfig, CollectorConfig, DistillerConfig, SourceConfig, SyncConfig,
+    AppConfig, CollectorConfig, DistillerConfig, ProviderProfile, SourceConfig, SyncConfig,
 };
 use crate::AppState;
 
@@ -21,18 +21,21 @@ pub struct AppConfigDto {
 #[serde(rename_all = "camelCase")]
 pub struct DistillerConfigDto {
     pub active_profile_id: String,
-    pub profiles: Vec<ApiProfileDto>,
+    pub profiles: Vec<ProviderProfileDto>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiProfileDto {
+pub struct ProviderProfileDto {
     pub id: String,
     pub name: String,
+    pub kind: String,
     pub provider: String,
     pub base_url: String,
     pub api_key: String,
     pub model: String,
+    pub command: String,
+    pub args: Vec<String>,
     pub timeout_secs: u64,
 }
 
@@ -66,7 +69,7 @@ impl From<&AppConfig> for AppConfigDto {
                     .distiller
                     .profiles
                     .iter()
-                    .map(ApiProfileDto::from)
+                    .map(ProviderProfileDto::from)
                     .collect(),
             },
             collector: CollectorConfigDto {
@@ -89,29 +92,35 @@ impl From<&AppConfig> for AppConfigDto {
     }
 }
 
-impl From<&ApiProfile> for ApiProfileDto {
-    fn from(p: &ApiProfile) -> Self {
+impl From<&ProviderProfile> for ProviderProfileDto {
+    fn from(p: &ProviderProfile) -> Self {
         Self {
             id: p.id.clone(),
             name: p.name.clone(),
+            kind: p.kind.clone(),
             provider: p.provider.clone(),
             base_url: p.base_url.clone(),
             api_key: p.api_key.clone(),
             model: p.model.clone(),
+            command: p.command.clone(),
+            args: p.args.clone(),
             timeout_secs: p.timeout_secs,
         }
     }
 }
 
-impl From<ApiProfileDto> for ApiProfile {
-    fn from(p: ApiProfileDto) -> Self {
+impl From<ProviderProfileDto> for ProviderProfile {
+    fn from(p: ProviderProfileDto) -> Self {
         Self {
             id: p.id,
             name: p.name,
+            kind: p.kind,
             provider: p.provider,
             base_url: p.base_url,
             api_key: p.api_key,
             model: p.model,
+            command: p.command,
+            args: p.args,
             timeout_secs: p.timeout_secs,
         }
     }
@@ -126,7 +135,7 @@ impl From<AppConfigDto> for AppConfig {
                     .distiller
                     .profiles
                     .into_iter()
-                    .map(ApiProfile::from)
+                    .map(ProviderProfile::from)
                     .collect(),
                 legacy_api: None,
             },
@@ -150,13 +159,22 @@ impl From<AppConfigDto> for AppConfig {
     }
 }
 
-fn profile_params(profile: ApiProfileDto) -> Result<serde_json::Value, String> {
-    let profile = ApiProfile::from(profile);
+fn profile_params(profile: ProviderProfileDto) -> Result<serde_json::Value, String> {
+    let profile = ProviderProfile::from(profile);
+    if profile.kind == "cli" {
+        if profile.command.trim().is_empty() {
+            return Err("请先填写 CLI 命令".to_string());
+        }
+        return Ok(serde_json::json!({
+            "kind": "cli", "provider": profile.provider, "command": profile.command,
+            "args": profile.args, "model": profile.model, "timeout_secs": profile.timeout_secs,
+        }));
+    }
     if profile.api_key.trim().is_empty() || profile.base_url.trim().is_empty() {
         return Err("请先填写 API Key 和 Base URL".to_string());
     }
     Ok(serde_json::json!({
-        "provider": profile.provider, "base_url": profile.base_url,
+        "kind": "api", "provider": profile.provider, "base_url": profile.base_url,
         "api_key": profile.api_key, "model": profile.model, "timeout_secs": profile.timeout_secs,
     }))
 }
@@ -193,7 +211,7 @@ pub async fn save_config(state: State<'_, AppState>, config: AppConfigDto) -> Re
 #[tauri::command]
 pub async fn list_provider_models(
     state: State<'_, AppState>,
-    profile: ApiProfileDto,
+    profile: ProviderProfileDto,
 ) -> Result<Vec<String>, String> {
     let sidecar = state.sidecar.as_ref().ok_or("Sidecar 未就绪")?.clone();
     let params = profile_params(profile)?;
@@ -208,7 +226,7 @@ pub async fn list_provider_models(
 #[tauri::command]
 pub async fn test_provider(
     state: State<'_, AppState>,
-    profile: ApiProfileDto,
+    profile: ProviderProfileDto,
 ) -> Result<String, String> {
     let sidecar = state.sidecar.as_ref().ok_or("Sidecar 未就绪")?.clone();
     let params = profile_params(profile)?;
@@ -226,13 +244,16 @@ mod tests {
 
     #[test]
     fn profile_dto_uses_camel_case() {
-        let json = serde_json::to_value(ApiProfileDto {
+        let json = serde_json::to_value(ProviderProfileDto {
             id: "sf".into(),
             name: "硅基流动".into(),
+            kind: "api".into(),
             provider: "siliconflow".into(),
             base_url: "https://api.siliconflow.cn/v1".into(),
             api_key: "secret".into(),
             model: "deepseek-ai/DeepSeek-V3".into(),
+            command: String::new(),
+            args: Vec::new(),
             timeout_secs: 120,
         })
         .unwrap();

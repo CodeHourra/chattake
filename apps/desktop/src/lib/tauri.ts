@@ -7,7 +7,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import type {
   AppConfigDto,
-  ApiProfileDto,
+  ProviderProfileDto,
   Card,
   CardSummary,
   ListCardsParams,
@@ -137,11 +137,11 @@ export const api = {
   saveConfig: (config: AppConfigDto) => invoke<void>('save_config', { config }),
 
   /** 临时加载供应商模型列表；结果不持久化。 */
-  listProviderModels: (profile: ApiProfileDto) =>
+  listProviderModels: (profile: ProviderProfileDto) =>
     invoke<string[]>('list_provider_models', { profile }),
 
   /** 优先测试模型列表；不支持时发送最小 Chat Completions 请求。 */
-  testProvider: (profile: ApiProfileDto) =>
+  testProvider: (profile: ProviderProfileDto) =>
     invoke<string>('test_provider', { profile }),
 
   /** 获取只读 MCP 的可用状态、路径与手动配置片段。 */

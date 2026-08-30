@@ -10,6 +10,7 @@
 //! ```
 
 pub mod claude_code;
+pub mod agent_jsonl;
 pub mod codebuddy;
 pub mod codex;
 pub mod cursor;

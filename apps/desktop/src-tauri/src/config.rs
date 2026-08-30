@@ -1,4 +1,4 @@
-//! 应用配置管理：四个内置采集源 + 多 API 配置、单配置激活。
+//! 应用配置管理：内置采集源 + 多分析 Provider 配置、单配置激活。
 
 use std::collections::HashSet;
 use std::fs;
@@ -35,7 +35,7 @@ pub struct DistillerConfig {
     #[serde(default)]
     pub active_profile_id: String,
     #[serde(default)]
-    pub profiles: Vec<ApiProfile>,
+    pub profiles: Vec<ProviderProfile>,
     /// 仅用于把 v0.1 的单 API 配置迁移成 profile；落盘时移除。
     #[serde(default, rename = "api", skip_serializing)]
     pub legacy_api: Option<LegacyApiConfig>,
@@ -55,13 +55,16 @@ impl Default for DistillerConfig {
     fn default() -> Self {
         Self {
             active_profile_id: "default".to_string(),
-            profiles: vec![ApiProfile {
+            profiles: vec![ProviderProfile {
                 id: "default".to_string(),
                 name: "OpenAI".to_string(),
+                kind: default_provider_kind(),
                 provider: "openai".to_string(),
                 base_url: "https://api.openai.com/v1".to_string(),
                 api_key: String::new(),
                 model: String::new(),
+                command: String::new(),
+                args: Vec::new(),
                 timeout_secs: default_timeout(),
             }],
             legacy_api: None,
@@ -70,14 +73,23 @@ impl Default for DistillerConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ApiProfile {
+pub struct ProviderProfile {
     /// 稳定本机标识；重命名配置不会改变该值。
     pub id: String,
     pub name: String,
+    #[serde(default = "default_provider_kind")]
+    pub kind: String,
     pub provider: String,
+    #[serde(default)]
     pub base_url: String,
+    #[serde(default)]
     pub api_key: String,
+    #[serde(default)]
     pub model: String,
+    #[serde(default)]
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
     #[serde(default = "default_timeout")]
     pub timeout_secs: u64,
 }
@@ -101,6 +113,9 @@ fn default_true() -> bool {
 }
 fn default_timeout() -> u64 {
     120
+}
+fn default_provider_kind() -> String {
+    "api".to_string()
 }
 
 fn default_codebuddy_scan_dirs() -> Vec<String> {
@@ -138,6 +153,18 @@ fn builtin_sources() -> Vec<SourceConfig> {
             name: "CodeBuddy".to_string(),
             enabled: false,
             scan_dirs: default_codebuddy_scan_dirs(),
+        },
+        SourceConfig {
+            id: "omp".to_string(),
+            name: "Oh My Pi".to_string(),
+            enabled: true,
+            scan_dirs: vec!["~/.omp/agent/sessions".to_string()],
+        },
+        SourceConfig {
+            id: "pi".to_string(),
+            name: "Pi".to_string(),
+            enabled: true,
+            scan_dirs: vec!["~/.pi/agent/sessions".to_string()],
         },
     ]
 }
@@ -197,7 +224,7 @@ impl AppConfig {
         Ok(config)
     }
 
-    /// 只保留 v0.2 支持的四个内置来源；不保留 CLI/internal 兼容入口。
+    /// 只保留 v0.2 支持的内置来源；不保留 internal 路径。
     fn normalize(&mut self) -> bool {
         let mut changed = false;
         let old = std::mem::take(&mut self.collector.sources);
@@ -227,15 +254,18 @@ impl AppConfig {
             self.distiller = if let Some(api) = self.distiller.legacy_api.take() {
                 DistillerConfig {
                     active_profile_id: "migrated-api".to_string(),
-                    profiles: vec![ApiProfile {
+                    profiles: vec![ProviderProfile {
                         id: "migrated-api".to_string(),
                         name: "已迁移 API".to_string(),
+                        kind: default_provider_kind(),
                         provider: api.provider,
                         base_url: api
                             .base_url
                             .unwrap_or_else(|| "https://api.openai.com/v1".to_string()),
                         api_key: api.api_key,
                         model: api.model,
+                        command: String::new(),
+                        args: Vec::new(),
                         timeout_secs: api.timeout_secs,
                     }],
                     legacy_api: None,
@@ -258,31 +288,43 @@ impl AppConfig {
 
     pub fn validate(&self) -> ConfigResult<()> {
         if self.distiller.profiles.is_empty() {
-            return Err(ConfigError::Invalid("至少需要一套 API 配置".to_string()));
+            return Err(ConfigError::Invalid("至少需要一套分析 Provider 配置".to_string()));
         }
         let mut ids = HashSet::new();
         for profile in &self.distiller.profiles {
             if profile.id.trim().is_empty() || !ids.insert(profile.id.as_str()) {
                 return Err(ConfigError::Invalid(
-                    "API 配置 id 不能为空或重复".to_string(),
+                    "Provider 配置 id 不能为空或重复".to_string(),
                 ));
             }
             if profile.name.trim().is_empty() {
                 return Err(ConfigError::Invalid(format!(
-                    "API 配置 {} 缺少显示名称",
+                    "Provider 配置 {} 缺少显示名称",
                     profile.id
+                )));
+            }
+            if !matches!(profile.kind.as_str(), "api" | "cli") {
+                return Err(ConfigError::Invalid(format!(
+                    "Provider 配置 {} 的类型必须是 api 或 cli",
+                    profile.name
+                )));
+            }
+            if profile.kind == "cli" && profile.command.trim().is_empty() {
+                return Err(ConfigError::Invalid(format!(
+                    "CLI Provider 配置 {} 缺少命令",
+                    profile.name
                 )));
             }
             if !(10..=600).contains(&profile.timeout_secs) {
                 return Err(ConfigError::Invalid(format!(
-                    "API 配置 {} 的超时必须在 10–600 秒之间",
+                    "Provider 配置 {} 的超时必须在 10–600 秒之间",
                     profile.name
                 )));
             }
         }
         if !ids.contains(self.distiller.active_profile_id.as_str()) {
             return Err(ConfigError::Invalid(
-                "当前激活的 API 配置不存在".to_string(),
+                "当前激活的 Provider 配置不存在".to_string(),
             ));
         }
         Ok(())
@@ -313,24 +355,38 @@ impl AppConfig {
             .map(|s| s.name.clone())
     }
 
-    pub fn api_profile(&self, profile_id: Option<&str>) -> Result<&ApiProfile, String> {
+    pub fn provider_profile(&self, profile_id: Option<&str>) -> Result<&ProviderProfile, String> {
         let id = profile_id.unwrap_or(&self.distiller.active_profile_id);
         self.distiller
             .profiles
             .iter()
             .find(|p| p.id == id)
-            .ok_or_else(|| format!("未找到 API 配置：{}", id))
+            .ok_or_else(|| format!("未找到 Provider 配置：{}", id))
     }
 
     pub fn sidecar_init_params(&self, profile_id: Option<&str>) -> Result<Value, String> {
-        let profile = self.api_profile(profile_id)?;
+        let profile = self.provider_profile(profile_id)?;
+        if profile.kind == "cli" {
+            if profile.command.trim().is_empty() {
+                return Err(format!("CLI Provider「{}」尚未填写命令", profile.name));
+            }
+            return Ok(serde_json::json!({
+                "kind": "cli",
+                "provider": profile.provider,
+                "command": profile.command,
+                "args": profile.args,
+                "model": profile.model,
+                "timeout_secs": profile.timeout_secs,
+            }));
+        }
         if profile.api_key.trim().is_empty() {
-            return Err(format!("API 配置「{}」尚未填写 API Key", profile.name));
+            return Err(format!("API Provider「{}」尚未填写 API Key", profile.name));
         }
         if profile.base_url.trim().is_empty() || profile.model.trim().is_empty() {
-            return Err(format!("API 配置「{}」缺少 Base URL 或模型", profile.name));
+            return Err(format!("API Provider「{}」缺少 Base URL 或模型", profile.name));
         }
         Ok(serde_json::json!({
+            "kind": "api",
             "provider": profile.provider,
             "base_url": profile.base_url,
             "api_key": profile.api_key,
@@ -363,7 +419,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_have_four_sources_and_one_profile() {
+    fn defaults_have_six_sources_and_one_profile() {
         let config = AppConfig::default();
         let ids: Vec<&str> = config
             .collector
@@ -371,7 +427,7 @@ mod tests {
             .iter()
             .map(|s| s.id.as_str())
             .collect();
-        assert_eq!(ids, vec!["claude-code", "cursor", "codex", "codebuddy"]);
+        assert_eq!(ids, vec!["claude-code", "cursor", "codex", "codebuddy", "omp", "pi"]);
         assert_eq!(config.distiller.profiles.len(), 1);
         assert_eq!(config.distiller.active_profile_id, "default");
         assert!(config.sync.scan_on_startup);
@@ -380,19 +436,22 @@ mod tests {
     #[test]
     fn profile_roundtrip_and_selection() {
         let mut config = AppConfig::default();
-        config.distiller.profiles.push(ApiProfile {
+        config.distiller.profiles.push(ProviderProfile {
             id: "siliconflow-main".to_string(),
             name: "硅基流动".to_string(),
+            kind: "api".to_string(),
             provider: "siliconflow".to_string(),
             base_url: "https://api.siliconflow.cn/v1".to_string(),
             api_key: "sk-test".to_string(),
             model: "deepseek-ai/DeepSeek-V3".to_string(),
+            command: String::new(),
+            args: Vec::new(),
             timeout_secs: 90,
         });
         config.distiller.active_profile_id = "siliconflow-main".to_string();
         let text = toml::to_string_pretty(&config).unwrap();
         let parsed: AppConfig = toml::from_str(&text).unwrap();
-        let selected = parsed.api_profile(None).unwrap();
+        let selected = parsed.provider_profile(None).unwrap();
         assert_eq!(selected.provider, "siliconflow");
         assert_eq!(selected.timeout_secs, 90);
     }
@@ -408,7 +467,7 @@ mod tests {
     }
 
     #[test]
-    fn migrates_v01_single_api_without_cli_compatibility() {
+    fn migrates_v01_single_api() {
         let text = r#"
 [collector]
 sources = []
@@ -427,7 +486,7 @@ interval_secs = 300
         let mut config: AppConfig = toml::from_str(text).unwrap();
         assert!(config.normalize());
         assert_eq!(config.distiller.active_profile_id, "migrated-api");
-        assert_eq!(config.api_profile(None).unwrap().model, "deepseek-chat");
+        assert_eq!(config.provider_profile(None).unwrap().model, "deepseek-chat");
         assert!(!toml::to_string(&config)
             .unwrap()
             .contains("[distiller.api]"));

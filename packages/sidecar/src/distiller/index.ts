@@ -2,7 +2,7 @@
  * Distiller 模块入口 —— 组装前处理器 + OpenAI-compatible API + Prompt 模板，
  * 导出 JSON-RPC handler 供 index.ts 注册使用。
  *
- * v0.2 仅支持 HTTP API。
+ * v0.2 支持 OpenAI-compatible API 与本地 CLI Provider。
  */
 
 import { createHash } from 'node:crypto'
@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto'
 import { preprocess } from './preprocessor'
 import { PROMPT_EXTRACT_KNOWLEDGE, PROMPT_JUDGE_VALUE } from './prompts'
 import { ApiProvider, listApiModels, type ApiProviderConfig, type DistillResult } from './api-provider'
+import { CliProvider, testCliProvider, type CliProviderConfig } from './cli-provider'
 import { normalizeLlmTags, normalizeLlmTechStack } from './tech-tags'
 import { distillLog, resolveTraceId } from './trace'
 
@@ -55,9 +56,14 @@ export function initApiProvider(config: ApiProviderConfig): void {
   console.error(`[distiller] API Provider initialized: ${config.provider}/${config.model}`)
 }
 
+export function initCliProvider(config: CliProviderConfig): void {
+  provider = new CliProvider(config)
+  console.error(`[distiller] CLI Provider initialized: ${config.provider}/${config.model || 'default'}`)
+}
+
 function getProvider(): Provider {
   if (!provider) {
-    throw new Error('Distiller 未初始化，请先调用 init 方法配置 API')
+    throw new Error('Distiller 未初始化，请先调用 init 方法配置 Provider')
   }
   return provider
 }
@@ -344,14 +350,27 @@ export async function handleExtractKnowledge(
  * init handler —— 初始化 Provider 配置。
  * 由 Rust 侧在 sidecar 启动后调用。
  *
- * 输入：{ provider, base_url, api_key, model, timeout_secs? }
+ * 输入：API 或 CLI Provider 配置。
  */
 export async function handleInit(
   params: Record<string, unknown>,
 ): Promise<{ status: string }> {
-  const apiConfig = parseApiConfig(params)
-  initApiProvider(apiConfig)
+  if (params.kind === 'cli') initCliProvider(parseCliConfig(params))
+  else initApiProvider(parseApiConfig(params))
   return { status: 'ok' }
+}
+
+function parseCliConfig(params: Record<string, unknown>): CliProviderConfig {
+  if (typeof params.command !== 'string' || !params.command.trim()) {
+    throw new Error('参数缺失或类型错误: 需要 command 字段')
+  }
+  return {
+    provider: typeof params.provider === 'string' ? params.provider : 'custom-cli',
+    command: params.command,
+    args: Array.isArray(params.args) ? params.args.filter((arg): arg is string => typeof arg === 'string') : [],
+    model: typeof params.model === 'string' ? params.model : undefined,
+    timeoutMs: typeof params.timeout_secs === 'number' ? params.timeout_secs * 1000 : undefined,
+  }
 }
 
 function parseApiConfig(params: Record<string, unknown>): ApiProviderConfig {
@@ -369,10 +388,12 @@ function parseApiConfig(params: Record<string, unknown>): ApiProviderConfig {
 }
 
 export async function handleListModels(params: Record<string, unknown>): Promise<string[]> {
+  if (params.kind === 'cli') return []
   return listApiModels(parseApiConfig(params))
 }
 
 export async function handleTestProvider(params: Record<string, unknown>): Promise<string> {
+  if (params.kind === 'cli') return testCliProvider(parseCliConfig(params))
   const config = parseApiConfig(params)
   try {
     await listApiModels(config)

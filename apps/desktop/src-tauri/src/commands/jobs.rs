@@ -265,7 +265,12 @@ fn start_analysis_internal(
     for id in session_ids {
         db.get_session(id).map_err(|error| error.to_string())?;
     }
-    let profile = config.api_profile(provider_profile_id)?;
+    let profile = config.provider_profile(provider_profile_id)?;
+    let target = if profile.kind == "cli" {
+        profile.command.as_str()
+    } else {
+        profile.base_url.as_str()
+    };
     let items = session_ids
         .iter()
         .map(|id| NewJobItem {
@@ -281,7 +286,7 @@ fn start_analysis_internal(
             Some((
                 &profile.id,
                 &profile.provider,
-                &profile.base_url,
+                target,
                 &profile.model,
             )),
             &items,

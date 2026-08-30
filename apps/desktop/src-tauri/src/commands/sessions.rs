@@ -209,11 +209,15 @@ pub(crate) fn run_distill_pipeline(
         return Err("会话正文为空，无法提炼".to_string());
     }
 
-    let profile = config.api_profile(provider_profile_id)?;
-    let base_url_host = Url::parse(&profile.base_url)
-        .ok()
-        .and_then(|url| url.host_str().map(str::to_owned))
-        .unwrap_or_else(|| "invalid-base-url".to_string());
+    let profile = config.provider_profile(provider_profile_id)?;
+    let base_url_host = if profile.kind == "cli" {
+        "local-cli".to_string()
+    } else {
+        Url::parse(&profile.base_url)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_owned))
+            .unwrap_or_else(|| "invalid-base-url".to_string())
+    };
     let content_hash = session
         .content_hash
         .clone()

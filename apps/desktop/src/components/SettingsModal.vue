@@ -6,6 +6,7 @@ import {
   NTabPane, NTabs, NTag,
 } from 'naive-ui'
 import { getIdentifier, getTauriVersion, getVersion } from '@tauri-apps/api/app'
+import { open } from '@tauri-apps/plugin-dialog'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import appChangelogMd from '../data/app-changelog.md?raw'
 import { api } from '../lib/tauri'
@@ -15,12 +16,18 @@ const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ 'update:show': [value: boolean] }>()
 
 const providerPresets = [
-  { label: 'OpenAI', value: 'openai', baseUrl: 'https://api.openai.com/v1' },
-  { label: 'DeepSeek', value: 'deepseek', baseUrl: 'https://api.deepseek.com/v1' },
-  { label: 'Moonshot（Kimi）', value: 'moonshot', baseUrl: 'https://api.moonshot.cn/v1' },
-  { label: '智谱 GLM', value: 'zhipu', baseUrl: 'https://open.bigmodel.cn/api/paas/v4' },
-  { label: '硅基流动', value: 'siliconflow', baseUrl: 'https://api.siliconflow.cn/v1' },
-  { label: '自定义 OpenAI-compatible', value: 'openai-compatible', baseUrl: '' },
+  { label: 'API · OpenAI', value: 'openai', kind: 'api' as const, baseUrl: 'https://api.openai.com/v1', command: '' },
+  { label: 'API · DeepSeek', value: 'deepseek', kind: 'api' as const, baseUrl: 'https://api.deepseek.com/v1', command: '' },
+  { label: 'API · Moonshot（Kimi）', value: 'moonshot', kind: 'api' as const, baseUrl: 'https://api.moonshot.cn/v1', command: '' },
+  { label: 'API · 智谱 GLM', value: 'zhipu', kind: 'api' as const, baseUrl: 'https://open.bigmodel.cn/api/paas/v4', command: '' },
+  { label: 'API · 硅基流动', value: 'siliconflow', kind: 'api' as const, baseUrl: 'https://api.siliconflow.cn/v1', command: '' },
+  { label: 'API · 自定义 OpenAI-compatible', value: 'openai-compatible', kind: 'api' as const, baseUrl: '', command: '' },
+  { label: 'CLI · Claude Code', value: 'claude-code', kind: 'cli' as const, baseUrl: '', command: 'claude' },
+  { label: 'CLI · Codex', value: 'codex', kind: 'cli' as const, baseUrl: '', command: 'codex' },
+  { label: 'CLI · Cursor', value: 'cursor', kind: 'cli' as const, baseUrl: '', command: 'cursor-agent' },
+  { label: 'CLI · OMP', value: 'omp', kind: 'cli' as const, baseUrl: '', command: 'omp' },
+  { label: 'CLI · Pi', value: 'pi', kind: 'cli' as const, baseUrl: '', command: 'pi' },
+  { label: 'CLI · CodeBuddy', value: 'codebuddy', kind: 'cli' as const, baseUrl: '', command: 'codebuddy' },
 ]
 
 const loading = ref(false)
@@ -109,8 +116,9 @@ function addProfile(provider = 'openai') {
   const preset = providerPresets.find((item) => item.value === provider) ?? providerPresets[0]
   const id = makeId()
   config.distiller.profiles.push({
-    id, name: preset.label, provider: preset.value, baseUrl: preset.baseUrl,
-    apiKey: '', model: '', timeoutSecs: 120,
+    id, name: preset.label.replace(/^(API|CLI) · /, ''), kind: preset.kind,
+    provider: preset.value, baseUrl: preset.baseUrl, apiKey: '', model: '',
+    command: preset.command, args: [], timeoutSecs: 120,
   })
   selectedProfileId.value = id
 }
@@ -119,7 +127,7 @@ function copyProfile() {
   const config = workingConfig.value
   const profile = selectedProfile.value
   if (!config || !profile) return
-  const copy = { ...profile, id: makeId(), name: `${profile.name} 副本` }
+  const copy = { ...profile, args: [...profile.args], id: makeId(), name: `${profile.name} 副本` }
   config.distiller.profiles.push(copy)
   selectedProfileId.value = copy.id
 }
@@ -147,7 +155,9 @@ function onProviderChange(provider: string) {
   const preset = providerPresets.find((item) => item.value === provider)
   if (!profile || !preset) return
   profile.provider = provider
+  profile.kind = preset.kind
   profile.baseUrl = preset.baseUrl
+  profile.command = preset.command
   modelOptions.value[profile.id] = []
 }
 
@@ -165,6 +175,13 @@ async function refreshModels() {
   } finally {
     modelLoading.value = false
   }
+}
+
+async function chooseCommand() {
+  const profile = selectedProfile.value
+  if (!profile) return
+  const selected = await open({ multiple: false, directory: false, title: '选择 CLI 可执行文件' })
+  if (typeof selected === 'string') profile.command = selected
 }
 
 async function testConnection() {
@@ -227,7 +244,7 @@ function close() { emit('update:show', false) }
               每个分析任务固定使用启动时选中的配置；失败后不会自动跨供应商切换。
             </n-alert>
             <div class="profile-layout">
-              <aside class="profile-list" aria-label="API 配置列表">
+              <aside class="profile-list" aria-label="分析 Provider 配置列表">
                 <button
                   v-for="profile in workingConfig.distiller.profiles"
                   :key="profile.id"
@@ -237,7 +254,7 @@ function close() { emit('update:show', false) }
                   @click="selectedProfileId = profile.id"
                 >
                   <span class="truncate">{{ profile.name }}</span>
-                  <span v-if="profile.id === workingConfig.distiller.activeProfileId" class="active-dot" title="当前配置" />
+                  <span class="profile-meta"><small>{{ profile.kind.toUpperCase() }}</small><span v-if="profile.id === workingConfig.distiller.activeProfileId" class="active-dot" title="当前配置" /></span>
                 </button>
                 <n-select
                   size="small"
@@ -267,22 +284,35 @@ function close() { emit('update:show', false) }
 
                 <n-form size="small" label-placement="left" label-width="88">
                   <n-form-item label="显示名称"><n-input v-model:value="selectedProfile.name" /></n-form-item>
-                  <n-form-item label="供应商">
+                  <n-form-item label="Provider">
                     <n-select :value="selectedProfile.provider" :options="providerPresets" @update:value="onProviderChange" />
                   </n-form-item>
-                  <n-form-item label="Base URL"><n-input v-model:value="selectedProfile.baseUrl" placeholder="https://example.com/v1" /></n-form-item>
-                  <n-form-item label="API Key">
+                  <n-form-item v-if="selectedProfile.kind === 'api'" label="Base URL"><n-input v-model:value="selectedProfile.baseUrl" placeholder="https://example.com/v1" /></n-form-item>
+                  <n-form-item v-if="selectedProfile.kind === 'api'" label="API Key">
                     <n-input v-model:value="selectedProfile.apiKey" type="password" show-password-on="click" placeholder="sk-..." />
+                  </n-form-item>
+                  <n-form-item v-else label="CLI 命令">
+                    <div class="flex gap-2 w-full">
+                      <n-input v-model:value="selectedProfile.command" placeholder="命令名或可执行文件绝对路径" />
+                      <n-button secondary @click="chooseCommand">选择</n-button>
+                    </div>
+                  </n-form-item>
+                  <n-form-item v-if="selectedProfile.kind === 'cli'" label="附加参数">
+                    <n-input
+                      :value="selectedProfile.args.join(' ')"
+                      placeholder="可选；使用空格分隔，不经过 shell"
+                      @update:value="selectedProfile.args = $event.trim() ? $event.trim().split(/\s+/) : []"
+                    />
                   </n-form-item>
                   <n-form-item label="模型">
                     <div class="flex gap-2 w-full">
                       <n-auto-complete
                         v-model:value="selectedProfile.model"
                         :options="selectedModelOptions"
-                        placeholder="可搜索或手填完整模型 ID"
+                        :placeholder="selectedProfile.kind === 'api' ? '可搜索或手填完整模型 ID' : '可选；留空使用 CLI 当前默认模型'"
                         clearable
                       />
-                      <n-button secondary :loading="modelLoading" @click="refreshModels">刷新模型</n-button>
+                      <n-button v-if="selectedProfile.kind === 'api'" secondary :loading="modelLoading" @click="refreshModels">刷新模型</n-button>
                     </div>
                   </n-form-item>
                   <n-form-item label="超时（秒）">
@@ -290,8 +320,8 @@ function close() { emit('update:show', false) }
                   </n-form-item>
                 </n-form>
                 <div class="flex items-center gap-3">
-                  <n-button secondary :loading="testing" @click="testConnection">测试连接</n-button>
-                  <span class="text-xs text-neutral-400">模型接口不可用时会发送最小请求，可能消耗极少 Token。</span>
+                  <n-button secondary :loading="testing" @click="testConnection">{{ selectedProfile.kind === 'cli' ? '检测命令' : '测试连接' }}</n-button>
+                  <span class="text-xs text-neutral-400">{{ selectedProfile.kind === 'cli' ? '只检查命令是否可执行，不调用模型。' : '模型接口不可用时会发送最小请求，可能消耗极少 Token。' }}</span>
                 </div>
               </section>
             </div>
@@ -301,7 +331,7 @@ function close() { emit('update:show', false) }
         <n-tab-pane name="sources" tab="数据源">
           <div class="settings-scroll py-3 space-y-2">
             <n-alert type="info" :bordered="false" class="!text-xs mb-3">
-              仅支持 Claude Code、Cursor、Codex 和 CodeBuddy。启动扫描只发现变化，不会自动调用模型。
+              支持 Claude Code、Cursor、Codex、CodeBuddy、OMP 和 Pi。启动扫描只发现变化，不会自动调用模型。
             </n-alert>
             <div v-for="source in workingConfig.collector.sources" :key="source.id" class="source-row">
               <div class="min-w-0">
@@ -374,6 +404,8 @@ function close() { emit('update:show', false) }
 .profile-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 38px; padding: 8px 10px; border: 1px solid transparent; border-radius: 10px; text-align: left; color: inherit; }
 .profile-item:hover { background: rgba(78, 102, 91, .08); }
 .profile-item.selected { border-color: rgba(78, 102, 91, .35); background: rgba(78, 102, 91, .12); }
+.profile-meta { display: inline-flex; align-items: center; gap: 7px; color: var(--text-muted); }
+.profile-meta small { font-size: 9px; letter-spacing: .08em; }
 .active-dot { width: 7px; height: 7px; border-radius: 999px; background: #49685c; box-shadow: 0 0 0 3px rgba(73, 104, 92, .14); }
 .profile-editor { min-width: 0; padding: 4px 4px 12px; }
 .source-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 14px; border: 1px solid var(--n-border-color); border-radius: 12px; }

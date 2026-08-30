@@ -36,7 +36,7 @@ function previewHeadTail(s: string, n: number): { head: string; tail: string; om
 }
 
 /**
- * API 模式：与 `chat.completions.create` 的 messages 完全一致（system 含 CONTENT_HINT_API）。
+ * API 模式：与 `chat.completions.create` 的 messages 完全一致（system 含 CONTENT_HINT）。
  */
 export function logOutgoingOpenAiChat(args: {
   /** 与 Rust distill trace_id 一致 */
@@ -45,7 +45,7 @@ export function logOutgoingOpenAiChat(args: {
   callLabel: string
   provider: string
   model: string
-  /** 已拼接 CONTENT_HINT_API 后的最终 system 正文 */
+  /** 已拼接 CONTENT_HINT 后的最终 system 正文 */
   systemFull: string
   /** preprocess 后的 user 正文（与 messages[1].content 一致） */
   userFull: string

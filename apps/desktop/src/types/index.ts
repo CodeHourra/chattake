@@ -240,16 +240,19 @@ export interface AppConfigDto {
 
 export interface DistillerConfigDto {
   activeProfileId: string
-  profiles: ApiProfileDto[]
+  profiles: ProviderProfileDto[]
 }
 
-export interface ApiProfileDto {
+export interface ProviderProfileDto {
   id: string
   name: string
+  kind: 'api' | 'cli'
   provider: string
   baseUrl: string
   apiKey: string
   model: string
+  command: string
+  args: string[]
   timeoutSecs: number
 }
 

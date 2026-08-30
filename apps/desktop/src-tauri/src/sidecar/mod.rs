@@ -169,7 +169,18 @@ impl SidecarManager {
 
         if let Some(mut child) = proc_guard.take() {
             log::info!("停止 sidecar 进程...");
-            let _ = child.kill();
+            #[cfg(unix)]
+            let terminated = Command::new("kill")
+                .arg("-TERM")
+                .arg(child.id().to_string())
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false);
+            #[cfg(not(unix))]
+            let terminated = false;
+            if !terminated {
+                let _ = child.kill();
+            }
             let _ = child.wait();
         }
 

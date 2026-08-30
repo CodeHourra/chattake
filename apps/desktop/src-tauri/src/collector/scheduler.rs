@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use crate::config::AppConfig;
 use crate::storage::Database;
 
+use super::agent_jsonl::AgentJsonlCollector;
 use super::claude_code::ClaudeCodeCollector;
 use super::codebuddy::CodeBuddyCollector;
 use super::codex::CodexCollector;
@@ -94,6 +95,17 @@ impl<'a> CollectorScheduler<'a> {
             }
             "codex" => {
                 let collector = CodexCollector::new(scan_dirs);
+                collector.collect_changed(|path, mtime, size| {
+                    self.db
+                        .source_file_unchanged(&source.id, path, mtime, size)
+                        .unwrap_or(false)
+                })
+            }
+            "omp" | "pi" => {
+                let collector = AgentJsonlCollector::new(
+                    if source.id == "omp" { "omp" } else { "pi" },
+                    scan_dirs,
+                );
                 collector.collect_changed(|path, mtime, size| {
                     self.db
                         .source_file_unchanged(&source.id, path, mtime, size)
