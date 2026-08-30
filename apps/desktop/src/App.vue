@@ -14,11 +14,11 @@ import { useUiStore } from './stores/ui'
 const ui = useUiStore()
 const themeOverrides = computed(() => ({
   common: {
-    primaryColor: ui.darkMode ? '#7ea497' : '#2f5145',
-    primaryColorHover: ui.darkMode ? '#92b5aa' : '#3c6557',
-    primaryColorPressed: ui.darkMode ? '#658b7e' : '#254339',
-    borderRadius: '8px',
-    fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    primaryColor: ui.darkMode ? '#86aa9e' : '#31594f',
+    primaryColorHover: ui.darkMode ? '#9bbcaf' : '#406f62',
+    primaryColorPressed: ui.darkMode ? '#6e9286' : '#27493f',
+    borderRadius: '7px',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif',
   },
 }))
 </script>
@@ -37,19 +37,25 @@ const themeOverrides = computed(() => ({
 
 <style>
 :root {
-  font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --paper: #f3f0e7;
-  --paper-raised: #fbf9f3;
-  --ink: #181a18;
-  --muted: #73766f;
-  --line: #cbc6bb;
-  --pine: #2f5145;
-  --pine-soft: #dce7e1;
-  --vermilion: #c85b36;
+  --canvas: #f3f0e8;
+  --surface: #faf8f2;
+  --surface-glass: rgba(250, 248, 242, .78);
+  --ink: #1a1c1a;
+  --ink-soft: #4f524e;
+  --muted: #747671;
+  --line: #d7d2c8;
+  --line-strong: #c9c5bb;
+  --pine: #31594f;
+  --pine-soft: #dce8e2;
+  --vermilion: #c85f32;
+  --paper: var(--canvas);
+  --paper-raised: var(--surface);
+  --font-editorial: 'Songti SC', 'STSong', 'Noto Serif CJK SC', serif;
   --brand-500: var(--pine);
   --brand-600: #254339;
   color: var(--ink);
@@ -57,14 +63,17 @@ const themeOverrides = computed(() => ({
 }
 
 :root.dark {
-  --paper: #141613;
-  --paper-raised: #1c1f1b;
-  --ink: #f1eee5;
-  --muted: #a09f98;
-  --line: #393b36;
-  --pine: #7ea497;
-  --pine-soft: #23372f;
-  --vermilion: #df7955;
+  --canvas: #151714;
+  --surface: #1c1f1b;
+  --surface-glass: rgba(28, 31, 27, .8);
+  --ink: #f2efe7;
+  --ink-soft: #c5c5bd;
+  --muted: #989a94;
+  --line: #343832;
+  --line-strong: #464a43;
+  --pine: #86aa9e;
+  --pine-soft: #243a33;
+  --vermilion: #dc7650;
 }
 
 *,
@@ -82,9 +91,9 @@ body {
 .glass-bar,
 .glass-sidebar,
 .glass-panel {
-  background: color-mix(in srgb, var(--paper-raised) 84%, transparent) !important;
-  backdrop-filter: blur(24px) saturate(1.08);
-  -webkit-backdrop-filter: blur(24px) saturate(1.08);
+  background: var(--surface-glass) !important;
+  backdrop-filter: blur(24px) saturate(1.06);
+  -webkit-backdrop-filter: blur(24px) saturate(1.06);
 }
 
 .glass-bar { border-color: color-mix(in srgb, var(--line) 72%, transparent) !important; }

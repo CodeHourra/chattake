@@ -157,7 +157,14 @@ function openSearchHit(cardId: string, sessionId: string) {
 </script>
 
 <template>
-  <div class="flex flex-col h-full px-5 pt-5 mx-auto w-full relative">
+  <div class="sessions-page">
+    <header class="page-intro">
+      <div>
+        <p>CONVERSATION ARCHIVE / 对话档案</p>
+        <h2>追踪每一次思考的轨迹</h2>
+      </div>
+      <span>本地归档 · 用户确认后分析</span>
+    </header>
     <SessionToolbar />
 
     <!-- Toast -->
@@ -259,8 +266,8 @@ function openSearchHit(cardId: string, sessionId: string) {
 
       <template v-else>
         <!-- 列表标题行 -->
-        <div class="flex items-center justify-between mb-0">
-          <h2 class="text-base font-semibold text-slate-800 dark:text-slate-100">会话列表</h2>
+        <div class="list-heading">
+          <div><span>INDEX</span><strong>会话索引</strong></div>
           <n-button
             v-if="unanalyzedCount > 0 && !batchMode"
             size="small"
@@ -280,7 +287,7 @@ function openSearchHit(cardId: string, sessionId: string) {
         </p>
 
         <!-- 会话卡片列表 -->
-        <div class="flex-1 min-h-0 overflow-y-auto space-y-3 pb-32">
+        <div class="session-ledger">
           <SessionCard
             v-for="s in sessions.items"
             :key="s.id"
@@ -363,6 +370,16 @@ function openSearchHit(cardId: string, sessionId: string) {
 </template>
 
 <style scoped>
+.sessions-page { position:relative; display:flex; flex-direction:column; width:100%; max-width:1380px; height:100%; margin:0 auto; padding:30px 42px 0; }
+.page-intro { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:24px; padding-bottom:20px; border-bottom:1px solid var(--line-strong); }
+.page-intro p { margin:0 0 9px; color:var(--muted); font-size:10px; letter-spacing:.16em; }
+.page-intro h2 { margin:0; max-width:600px; color:var(--ink); font-family:var(--font-editorial); font-size:27px; font-weight:500; letter-spacing:.02em; line-height:1.2; }
+.page-intro > span { padding-bottom:3px; color:var(--muted); font-size:11px; }
+.list-heading { display:flex; align-items:center; justify-content:space-between; min-height:48px; border-bottom:1px solid var(--line-strong); }
+.list-heading > div { display:flex; align-items:baseline; gap:11px; }
+.list-heading span { color:var(--vermilion); font-size:9px; letter-spacing:.14em; }
+.list-heading strong { font-family:var(--font-editorial); font-size:15px; font-weight:600; }
+.session-ledger { flex:1; min-height:0; overflow-y:auto; padding-bottom:108px; }
 .glass-bar {
   background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(16px);
@@ -380,4 +397,5 @@ function openSearchHit(cardId: string, sessionId: string) {
     0 20px 25px -5px rgba(0, 0, 0, 0.3),
     0 10px 10px -5px rgba(0, 0, 0, 0.2);
 }
+@media (max-width:900px) { .sessions-page { padding:22px 22px 0; } .page-intro > span { display:none; } }
 </style>

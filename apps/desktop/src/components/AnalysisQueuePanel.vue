@@ -11,6 +11,7 @@ const collapsed = ref(false)
 const activeJob = computed(() => jobs.value.find((job) => job.status === 'running' || job.status === 'queued') ?? jobs.value[0])
 
 watch(hasAny, (value) => { if (!value) collapsed.value = false })
+watch(isIdle, (value) => { if (value && hasAny.value) collapsed.value = true }, { immediate: true })
 
 const statusLabel: Record<string, string> = {
   queued: '排队中', running: '执行中', succeeded: '已完成', failed: '失败',
@@ -97,10 +98,10 @@ function canRetry(item: JobItem) { return ['failed', 'cancelled', 'interrupted']
 </template>
 
 <style scoped>
-.task-center { position: fixed; right: 20px; bottom: 20px; z-index: 60; width: min(390px, calc(100vw - 32px)); max-height: min(620px, calc(100vh - 100px)); overflow: hidden; border: 1px solid rgba(122, 125, 117, .22); border-radius: 16px; background: color-mix(in srgb, var(--task-bg, #f7f5ef) 92%, transparent); box-shadow: 0 16px 48px rgba(20, 24, 22, .16); backdrop-filter: blur(22px) saturate(1.12); }
+.task-center { position: fixed; right: 20px; bottom: 20px; z-index: 60; width: min(360px, calc(100vw - 32px)); max-height: min(520px, calc(100vh - 100px)); overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-glass); box-shadow: 0 18px 54px rgba(20, 24, 22, .15); backdrop-filter: blur(22px) saturate(1.08); }
 .dark .task-center { --task-bg: #171917; border-color: rgba(255,255,255,.1); }
 .task-header { display: flex; align-items: center; justify-content: space-between; padding: 11px 13px; border-bottom: 1px solid rgba(122,125,117,.16); }
-.task-list { max-height: 540px; overflow-y: auto; padding: 10px; }
+.task-list { max-height: 442px; overflow-y: auto; padding: 10px; }
 .job-card { padding: 12px; border: 1px solid rgba(122,125,117,.16); border-radius: 12px; background: rgba(255,255,255,.42); }
 .job-card + .job-card { margin-top: 8px; }
 .dark .job-card { background: rgba(0,0,0,.14); }

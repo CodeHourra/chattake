@@ -55,6 +55,8 @@ const SOURCE_META: Record<string, { label: string; imgIcon?: string; fallbackIco
   'cursor': { label: 'Cursor', imgIcon: cursorIcon, fallbackIcon: 'i-lucide-mouse-pointer-click' },
   codebuddy: { label: 'CodeBuddy', imgIcon: codebuddyIcon, fallbackIcon: 'i-lucide-code' },
   codex: { label: 'Codex', imgIcon: openaiIcon, fallbackIcon: 'i-lucide-code-2' },
+  omp: { label: 'Oh My Pi', fallbackIcon: 'i-lucide-orbit' },
+  pi: { label: 'Pi', fallbackIcon: 'i-lucide-circle-dot' },
 }
 
 function getSourceMeta(sourceId: string) {
@@ -440,7 +442,7 @@ watch(() => ui.activeTab, (tab) => {
           <div
             class="flex items-center gap-2 px-2.5 py-1.5 rounded-md transition-colors cursor-pointer text-sm font-medium"
             :class="isAllMode
-              ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300'
+              ? 'all-active'
               : 'text-slate-700 dark:text-neutral-300 hover:bg-slate-100 dark:hover:bg-neutral-900'"
             @click="selectAll"
           >
@@ -695,7 +697,8 @@ watch(() => ui.activeTab, (tab) => {
 </template>
 
 <style scoped>
-.glass-sidebar { width: clamp(210px, 20vw, 260px); }
+.glass-sidebar { width: clamp(232px, 18vw, 282px); border-color:var(--line); }
+.all-active { color:var(--pine); background:color-mix(in srgb,var(--pine) 10%,transparent); }
 .sidebar-tree :deep(.n-tree-node-content__text) {
   font-size: 13px;
   overflow: hidden;
