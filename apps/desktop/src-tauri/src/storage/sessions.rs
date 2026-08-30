@@ -128,30 +128,15 @@ fn session_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Session
 const SESSION_SUMMARY_COLUMNS: &str = "\
     s.id, s.source_id, s.external_session_id, s.source_host, s.project_path, s.project_name, \
     s.message_count, s.status, s.value, s.updated_at, s.has_updates, s.created_at, \
-    (SELECT c.id      FROM cards c WHERE c.session_id = s.id ORDER BY c.created_at DESC LIMIT 1), \
-    (SELECT COALESCE(SUM(LENGTH(m.content)), 0) FROM messages m WHERE m.session_id = s.id), \
-    COALESCE(\
-        (SELECT c.title   FROM cards c WHERE c.session_id = s.id ORDER BY c.created_at DESC LIMIT 1), \
-        s.analysis_title\
-    ), \
-    COALESCE(\
-        (SELECT c.summary FROM cards c WHERE c.session_id = s.id ORDER BY c.created_at DESC LIMIT 1), \
-        s.analysis_note\
-    ), \
-    COALESCE(\
-        (SELECT c.\"type\" FROM cards c WHERE c.session_id = s.id ORDER BY c.created_at DESC LIMIT 1), \
-        s.analysis_type\
-    ), \
-    (SELECT GROUP_CONCAT(t.name, ',') \
-       FROM card_tags ct \
-       JOIN tags t ON ct.tag_id = t.id \
-       WHERE ct.card_id = ( \
-           SELECT c.id FROM cards c WHERE c.session_id = s.id ORDER BY c.created_at DESC LIMIT 1 \
-       )), \
-    s.raw_path, s.error_message, \
-    (SELECT SUBSTR(m.content, 1, 4096) FROM messages m \
-       WHERE m.session_id = s.id AND m.role = 'user' \
-       ORDER BY m.seq_order ASC LIMIT 1)";
+    lc.id, COALESCE(ms.raw_size_bytes,0), COALESCE(lc.title,s.analysis_title), \
+    COALESCE(lc.summary,s.analysis_note), COALESCE(lc.type,s.analysis_type), lt.names, \
+    s.raw_path, s.error_message, SUBSTR(fu.content,1,4096)";
+
+const SESSION_SUMMARY_CTES: &str = "WITH \
+    latest_card AS (SELECT * FROM (SELECT c.*,ROW_NUMBER() OVER(PARTITION BY session_id ORDER BY created_at DESC,id DESC) rn FROM cards c) WHERE rn=1), \
+    message_stats AS (SELECT session_id,SUM(LENGTH(content)) raw_size_bytes FROM messages GROUP BY session_id), \
+    first_user AS (SELECT session_id,content FROM (SELECT session_id,content,ROW_NUMBER() OVER(PARTITION BY session_id ORDER BY seq_order) rn FROM messages WHERE role='user') WHERE rn=1), \
+    latest_tags AS (SELECT ct.card_id,GROUP_CONCAT(t.name,',') names FROM card_tags ct JOIN tags t ON t.id=ct.tag_id GROUP BY ct.card_id) ";
 
 impl Database {
     pub fn source_file_unchanged(
@@ -313,6 +298,44 @@ impl Database {
         rows.collect::<Result<Vec<_>, _>>().map_err(DbError::from)
     }
 
+    pub fn get_session_messages_page(
+        &self,
+        session_id: &str,
+        cursor: Option<i64>,
+        limit: u32,
+    ) -> DbResult<CursorPage<Message>> {
+        let limit = limit.clamp(1, 100) as i64;
+        let conn = self.read_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id,session_id,role,content,timestamp,tokens_in,tokens_out,seq_order
+             FROM messages WHERE session_id=?1 AND seq_order>?2 ORDER BY seq_order LIMIT ?3",
+        )?;
+        let mut items = stmt
+            .query_map(
+                params![session_id, cursor.unwrap_or(-1), limit + 1],
+                |row| {
+                    Ok(Message {
+                        id: row.get(0)?,
+                        session_id: row.get(1)?,
+                        role: row.get(2)?,
+                        content: row.get(3)?,
+                        timestamp: row.get(4)?,
+                        tokens_in: row.get(5)?,
+                        tokens_out: row.get(6)?,
+                        seq_order: row.get(7)?,
+                    })
+                },
+            )?
+            .collect::<Result<Vec<_>, _>>()?;
+        let next_cursor = if items.len() as i64 > limit {
+            items.truncate(limit as usize);
+            items.last().map(|item| item.seq_order)
+        } else {
+            None
+        };
+        Ok(CursorPage { items, next_cursor })
+    }
+
     /// 分页查询会话列表，支持按数据源/项目/状态动态筛选。
     ///
     /// 分页参数: page 从 1 开始，page=0 等同于 page=1。
@@ -335,8 +358,13 @@ impl Database {
         // 再查当页数据
         let offset = page.saturating_sub(1) as i64 * page_size as i64;
         let list_sql = format!(
-            "SELECT {} FROM sessions s{} ORDER BY s.created_at DESC LIMIT ? OFFSET ?",
-            SESSION_SUMMARY_COLUMNS, where_clause
+            "{} SELECT {} FROM sessions s \
+             LEFT JOIN latest_card lc ON lc.session_id=s.id \
+             LEFT JOIN message_stats ms ON ms.session_id=s.id \
+             LEFT JOIN first_user fu ON fu.session_id=s.id \
+             LEFT JOIN latest_tags lt ON lt.card_id=lc.id \
+             {} ORDER BY s.created_at DESC LIMIT ? OFFSET ?",
+            SESSION_SUMMARY_CTES, SESSION_SUMMARY_COLUMNS, where_clause
         );
 
         let mut data_params = param_values;

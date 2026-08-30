@@ -29,4 +29,19 @@ export default defineConfig({
       ignored: ['**/src-tauri/**'],
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          const naive = id.match(/\/node_modules\/naive-ui\/es\/([^/]+)/)
+          if (naive) {
+            const core = new Set(['config-provider', 'modal', 'drawer', 'dialog', 'popover', 'button', 'button-group', 'empty', 'tag', 'tree', 'tree-select'])
+            return naive[1].startsWith('_') || core.has(naive[1]) ? 'vendor-naive-core' : 'vendor-naive-components'
+          }
+          if (id.includes('/node_modules/highlight.js/') || id.includes('/node_modules/marked/')) return 'vendor-markdown'
+          if (id.includes('/node_modules/vue/') || id.includes('/node_modules/vue-router/') || id.includes('/node_modules/pinia/')) return 'vendor-vue'
+        },
+      },
+    },
+  },
 })

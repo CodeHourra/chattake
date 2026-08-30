@@ -25,6 +25,9 @@ pub(super) fn card_summary_from_row(row: &Row<'_>) -> rusqlite::Result<CardSumma
         project_name: row.get(8)?,
         created_at: row.get(9)?,
         updated_at: row.get(10)?,
+        match_snippet: None,
+        tags: Vec::new(),
+        technologies: Vec::new(),
     })
 }
 

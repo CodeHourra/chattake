@@ -89,9 +89,42 @@ fn spawn_job(
                 let db = db.clone();
                 let config = config.clone();
                 let source_id = item.source_id.clone().unwrap_or_default();
+                let progress_db = db.clone();
+                let progress_app = app.clone();
+                let progress_job_id = job_id.clone();
+                let progress_source_id = source_id.clone();
                 tokio::task::spawn_blocking(move || {
-                    CollectorScheduler::new(&config, &db).collect_source(&source_id);
-                    Ok(())
+                    let result = CollectorScheduler::new(&config, &db)
+                        .collect_source_with_progress(&source_id, |raw_path, phase, error| {
+                            if let Ok(id) = progress_db.append_job_item(
+                                &progress_job_id,
+                                &NewJobItem {
+                                    session_id: None,
+                                    source_id: Some(&progress_source_id),
+                                    raw_path: Some(raw_path),
+                                },
+                            ) {
+                                let status = if error.is_some() {
+                                    "failed"
+                                } else {
+                                    "succeeded"
+                                };
+                                let _ = progress_db.finish_item(
+                                    &progress_job_id,
+                                    &id,
+                                    status,
+                                    phase,
+                                    0,
+                                    error,
+                                );
+                                emit_job(&progress_app, &progress_db, &progress_job_id);
+                            }
+                        });
+                    if result.failed > 0 {
+                        Err(format!("{} 个文件同步失败", result.failed))
+                    } else {
+                        Ok(())
+                    }
                 })
                 .await
                 .map_err(|error| error.to_string())

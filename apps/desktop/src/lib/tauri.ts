@@ -23,6 +23,7 @@ import type {
   TagCount,
   TagRecord,
   CardUpdatePayload,
+  CursorPage,
   TypeCount,
 } from '../types'
 
@@ -79,8 +80,8 @@ export const api = {
   getSession: (id: string) => invoke<Session>('get_session', { id }),
 
   /** 获取会话所有消息（对话回放用） */
-  getSessionMessages: (sessionId: string) =>
-    invoke<Message[]>('get_session_messages', { sessionId }),
+  getSessionMessages: (sessionId: string, cursor?: number | null) =>
+    invoke<CursorPage<Message>>('get_session_messages', { sessionId, cursor: cursor ?? null, limit: 100 }),
 
   /** FTS5 全文搜索卡片 */
   searchCards: (params: SearchCardsParams) =>

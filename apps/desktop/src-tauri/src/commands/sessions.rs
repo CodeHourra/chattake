@@ -19,7 +19,7 @@ use uuid::Uuid;
 use crate::config::AppConfig;
 use crate::sidecar::SidecarManager;
 use crate::storage::models::{
-    Message, NewCard, PaginatedResult, Session, SessionFilters, SessionSummary,
+    CursorPage, Message, NewCard, PaginatedResult, Session, SessionFilters, SessionSummary,
 };
 use crate::storage::Database;
 use crate::AppState;
@@ -143,15 +143,17 @@ pub async fn get_session(state: State<'_, AppState>, id: String) -> Result<Sessi
         .map_err(|e| format!("get_session join 失败: {}", e))?
 }
 
-/// 拉取会话下全部消息（按 seq_order 排序），供详情页对话回放。
+/// 游标分页拉取会话消息，单页最多 100 条。
 #[tauri::command(rename_all = "camelCase")]
 pub async fn get_session_messages(
     state: State<'_, AppState>,
     session_id: String,
-) -> Result<Vec<Message>, String> {
+    cursor: Option<i64>,
+    limit: Option<u32>,
+) -> Result<CursorPage<Message>, String> {
     let db = state.db.clone();
     tokio::task::spawn_blocking(move || {
-        db.get_session_messages(&session_id)
+        db.get_session_messages_page(&session_id, cursor, limit.unwrap_or(100))
             .map_err(|e| e.to_string())
     })
     .await

@@ -45,6 +45,11 @@ export interface PaginatedResult<T> {
   pageSize: number
 }
 
+export interface CursorPage<T> {
+  items: T[]
+  nextCursor: number | null
+}
+
 /** 列表行：会话摘要 */
 export interface SessionSummary {
   id: string
@@ -150,6 +155,9 @@ export interface CardSummary {
   projectName: string | null
   createdAt: string
   updatedAt: string
+  matchSnippet: string | null
+  tags: string[]
+  technologies: string[]
 }
 
 export interface SessionListParams {

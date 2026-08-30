@@ -38,6 +38,7 @@ pub struct SyncResult {
     pub updated: u32,
     /// 无变化跳过的会话数
     pub skipped: u32,
+    pub failed: u32,
 }
 
 /// 采集调度器，持有配置和数据库引用
@@ -51,7 +52,11 @@ impl<'a> CollectorScheduler<'a> {
         Self { config, db }
     }
 
-    pub fn collect_source(&self, source_id: &str) -> SyncResult {
+    pub fn collect_source_with_progress(
+        &self,
+        source_id: &str,
+        mut on_file: impl FnMut(&str, &str, Option<&str>),
+    ) -> SyncResult {
         let Some(source) = self
             .config
             .enabled_sources()
@@ -101,7 +106,7 @@ impl<'a> CollectorScheduler<'a> {
             }
         };
 
-        let result = self.dedup_and_write(&source.id, &sessions);
+        let result = self.dedup_and_write(&sessions, &mut on_file);
         log::info!(
             "数据源 {} 采集完成: 发现={}, 新增={}, 更新={}, 跳过={}",
             source.name,
@@ -119,7 +124,11 @@ impl<'a> CollectorScheduler<'a> {
     /// - session_id + source_host 不存在 → INSERT（新增）
     /// - 存在 + message_count 增加    → 标记 has_updates（更新）
     /// - 存在 + message_count 不变    → SKIP（跳过）
-    fn dedup_and_write(&self, _source_id: &str, sessions: &[NormalizedSession]) -> SyncResult {
+    fn dedup_and_write(
+        &self,
+        sessions: &[NormalizedSession],
+        on_file: &mut impl FnMut(&str, &str, Option<&str>),
+    ) -> SyncResult {
         let mut result = SyncResult {
             found: sessions.len() as u32,
             ..Default::default()
@@ -127,16 +136,26 @@ impl<'a> CollectorScheduler<'a> {
 
         for session in sessions {
             match self.write_one_session(session) {
-                Ok(WriteAction::New) => result.new += 1,
-                Ok(WriteAction::Updated) => result.updated += 1,
-                Ok(WriteAction::Skipped) => result.skipped += 1,
+                Ok(WriteAction::New) => {
+                    result.new += 1;
+                    on_file(&session.raw_path, "imported", None);
+                }
+                Ok(WriteAction::Updated) => {
+                    result.updated += 1;
+                    on_file(&session.raw_path, "updated", None);
+                }
+                Ok(WriteAction::Skipped) => {
+                    result.skipped += 1;
+                    on_file(&session.raw_path, "skipped", None);
+                }
                 Err(e) => {
                     log::error!(
                         "写入会话失败: session_id={}, error={}",
                         session.session_id,
                         e
                     );
-                    result.skipped += 1;
+                    result.failed += 1;
+                    on_file(&session.raw_path, "failed", Some(&e.to_string()));
                 }
             }
         }

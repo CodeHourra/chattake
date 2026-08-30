@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import {
   NTooltip,
   NButton,
@@ -13,8 +13,8 @@ import { useUiStore } from '../stores/ui'
 import { useAnalysisQueueStore } from '../stores/analysisQueue'
 import { api } from '../lib/tauri'
 import { exportAllCardsToDir } from '../lib/cardExport'
-import SettingsModal from './SettingsModal.vue'
-import AppUpdateModal from './AppUpdateModal.vue'
+const SettingsModal = defineAsyncComponent(() => import('./SettingsModal.vue'))
+const AppUpdateModal = defineAsyncComponent(() => import('./AppUpdateModal.vue'))
 
 const ui = useUiStore()
 const queue = useAnalysisQueueStore()
@@ -84,18 +84,18 @@ async function onSync() {
 </script>
 
 <template>
-  <header class="h-[60px] flex items-center justify-between px-4 border-b border-slate-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 shrink-0 z-50">
+  <header class="glass-bar h-[60px] flex items-center justify-between px-4 border-b shrink-0 z-50">
     <!-- 左侧：Logo + 分割线 + Tab 导航 -->
     <div class="flex items-center gap-6">
       <!-- Logo 区域 -->
       <div class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center text-white">
+        <div class="app-mark w-8 h-8 rounded-lg flex items-center justify-center">
           <span class="i-lucide-footprints w-5 h-5" />
         </div>
         <div class="flex flex-col">
           <h1 class="font-bold text-[15px] leading-tight tracking-wide text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
             寻迹
-            <span class="px-1 py-0.5 rounded text-[9px] bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-400 font-bold tracking-wider">BETA</span>
+            <span class="app-version px-1 py-0.5 rounded text-[9px] font-bold tracking-wider">0.2</span>
           </h1>
           <span class="text-[10px] text-slate-500 dark:text-slate-400 font-medium leading-tight tracking-wide">AI 编程知识沉淀</span>
         </div>
@@ -108,13 +108,8 @@ async function onSync() {
       <div class="flex items-center bg-slate-100/80 dark:bg-neutral-900/55 p-1 rounded-lg">
         <button
           type="button"
-          class="segment-pill-btn"
-          :class="[
-            'flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer border-0 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35',
-            ui.activeTab === 'sessions'
-              ? 'bg-white dark:bg-neutral-800 text-emerald-600 dark:text-emerald-400 ring-1 ring-slate-200/90 dark:ring-white/10'
-              : 'bg-transparent text-slate-500 hover:text-slate-800 dark:text-neutral-500 dark:hover:text-neutral-200',
-          ]"
+          class="segment-pill-btn nav-tab flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium cursor-pointer border-0 outline-none"
+          :class="{ active: ui.activeTab === 'sessions' }"
           @click="onTabChange('sessions')"
         >
           <span class="i-lucide-messages-square w-4 h-4" />
@@ -122,13 +117,8 @@ async function onSync() {
         </button>
         <button
           type="button"
-          class="segment-pill-btn"
-          :class="[
-            'flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer border-0 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35',
-            ui.activeTab === 'library'
-              ? 'bg-white dark:bg-neutral-800 text-emerald-600 dark:text-emerald-400 ring-1 ring-slate-200/90 dark:ring-white/10'
-              : 'bg-transparent text-slate-500 hover:text-slate-800 dark:text-neutral-500 dark:hover:text-neutral-200',
-          ]"
+          class="segment-pill-btn nav-tab flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium cursor-pointer border-0 outline-none"
+          :class="{ active: ui.activeTab === 'library' }"
           @click="onTabChange('library')"
         >
           <span class="i-lucide-library w-4 h-4" />
@@ -202,3 +192,12 @@ async function onSync() {
   <app-update-modal v-model:show="showAppUpdate" />
   <settings-modal v-model:show="showSettings" />
 </template>
+
+<style scoped>
+.app-mark { background: var(--ink); color: var(--paper); }
+.app-version { background: color-mix(in srgb, var(--vermilion) 16%, transparent); color: var(--vermilion); }
+.nav-tab { position: relative; color: var(--muted); transition: color .14s ease, background .14s ease; }
+.nav-tab:hover { color: var(--ink); }
+.nav-tab.active { color: var(--ink); background: color-mix(in srgb, var(--paper-raised) 82%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 72%, transparent); }
+.nav-tab.active::after { content: ''; position: absolute; left: 16px; right: 16px; bottom: -5px; height: 2px; border-radius: 2px; background: var(--vermilion); }
+</style>

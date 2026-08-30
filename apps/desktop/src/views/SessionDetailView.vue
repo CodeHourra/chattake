@@ -25,6 +25,8 @@ const { currentTask, tasks } = storeToRefs(queue)
 
 const session = ref<Session | null>(null)
 const messages = ref<Message[]>([])
+const nextCursor = ref<number | null>(null)
+const loadingMore = ref(false)
 const card = ref<Card | null>(null)
 const loading = ref(true)
 const analyzeError = ref<string | null>(null)
@@ -61,12 +63,13 @@ async function load() {
   loading.value = true
   loadError.value = null
   try {
-    const [sess, msgs] = await Promise.all([
+    const [sess, page] = await Promise.all([
       api.getSession(props.sessionId),
       api.getSessionMessages(props.sessionId),
     ])
     session.value = sess
-    messages.value = msgs
+    messages.value = page.items
+    nextCursor.value = page.nextCursor
 
     const cardId = typeof route.query.cardId === 'string' ? route.query.cardId : null
     if (cardId) {
@@ -80,6 +83,16 @@ async function load() {
   } finally {
     loading.value = false
   }
+}
+
+async function loadMoreMessages() {
+  if (nextCursor.value == null) return
+  loadingMore.value = true
+  try {
+    const page = await api.getSessionMessages(props.sessionId, nextCursor.value)
+    messages.value.push(...page.items)
+    nextCursor.value = page.nextCursor
+  } finally { loadingMore.value = false }
 }
 
 onMounted(load)
@@ -367,6 +380,7 @@ const valueColors: Record<string, string> = {
             <template #chat>
               <div class="max-h-[520px] overflow-y-auto pr-1">
                 <ChatReplay :messages="messages" />
+                <n-button v-if="nextCursor != null" block secondary :loading="loadingMore" class="mt-3" @click="loadMoreMessages">加载后续 100 条</n-button>
               </div>
             </template>
           </NoteCard>
@@ -436,6 +450,7 @@ const valueColors: Record<string, string> = {
                 </n-tooltip>
               </div>
               <ChatReplay :messages="messages" />
+              <n-button v-if="nextCursor != null" block secondary :loading="loadingMore" class="mt-3" @click="loadMoreMessages">加载后续 100 条</n-button>
             </div>
           </div>
         </template>

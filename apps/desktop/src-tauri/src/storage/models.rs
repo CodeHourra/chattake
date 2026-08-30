@@ -190,6 +190,12 @@ pub struct CardSummary {
     pub project_name: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    #[serde(default)]
+    pub match_snippet: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub technologies: Vec<String>,
 }
 
 // ─────────────────────────────── 标签 ─────────────────────────────────
@@ -259,6 +265,13 @@ pub struct PaginatedResult<T> {
     /// 当前页码（1-based）
     pub page: u32,
     pub page_size: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CursorPage<T> {
+    pub items: Vec<T>,
+    pub next_cursor: Option<i64>,
 }
 
 /// 会话列表筛选条件

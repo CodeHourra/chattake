@@ -53,14 +53,14 @@ function setStatusFilter(val: '' | 'analyzed' | 'pending') {
     </div>
 
     <!-- 过滤 & 信息行 -->
-    <div class="flex items-center justify-between">
+    <div class="flex flex-wrap items-center justify-between gap-2">
       <!-- 分段选择器：与顶栏 Tab 同一套扁平语义，segment-pill-btn 避免系统按钮灰底 -->
-      <div class="bg-slate-100/80 dark:bg-neutral-900/55 p-1 rounded-lg inline-flex">
+      <div class="bg-slate-100/80 dark:bg-neutral-900/55 p-1 rounded-lg inline-flex shrink-0">
         <button
           type="button"
           class="segment-pill-btn"
           :class="[
-            'px-5 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer border-0 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35',
+            'px-5 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors cursor-pointer border-0 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35',
             !filters.statusFilter
               ? 'bg-white dark:bg-neutral-800 text-slate-800 dark:text-slate-100 ring-1 ring-slate-200/90 dark:ring-white/10'
               : 'bg-transparent text-slate-500 hover:text-slate-800 dark:text-neutral-500 dark:hover:text-neutral-200',
@@ -73,7 +73,7 @@ function setStatusFilter(val: '' | 'analyzed' | 'pending') {
           type="button"
           class="segment-pill-btn"
           :class="[
-            'px-5 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer border-0 outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 flex items-center gap-1.5',
+            'px-5 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors cursor-pointer border-0 outline-none focus-visible:ring-2 focus-visible:ring-amber-500/35 flex items-center gap-1.5',
             filters.statusFilter === 'pending'
               ? 'bg-white dark:bg-neutral-800 text-amber-600 dark:text-amber-400 ring-1 ring-slate-200/90 dark:ring-white/10'
               : 'bg-transparent text-slate-500 hover:text-slate-800 dark:text-neutral-500 dark:hover:text-neutral-200',
@@ -86,7 +86,7 @@ function setStatusFilter(val: '' | 'analyzed' | 'pending') {
           type="button"
           class="segment-pill-btn"
           :class="[
-            'px-5 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer border-0 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35',
+            'px-5 py-1.5 rounded-md text-sm font-medium whitespace-nowrap transition-colors cursor-pointer border-0 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35',
             filters.statusFilter === 'analyzed'
               ? 'bg-white dark:bg-neutral-800 text-emerald-600 dark:text-emerald-400 ring-1 ring-slate-200/90 dark:ring-white/10'
               : 'bg-transparent text-slate-500 hover:text-slate-800 dark:text-neutral-500 dark:hover:text-neutral-200',
@@ -98,7 +98,7 @@ function setStatusFilter(val: '' | 'analyzed' | 'pending') {
       </div>
 
       <!-- 右侧统计 + 信息提示 -->
-      <div class="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+      <div class="flex min-w-0 items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
         <span>共 <strong class="text-slate-800 dark:text-slate-200 font-semibold mx-0.5">{{ sessions.total }}</strong> 条记录</span>
         <n-tooltip trigger="hover" placement="top-end">
           <template #trigger>
@@ -107,11 +107,11 @@ function setStatusFilter(val: '' | 'analyzed' | 'pending') {
           搜索对象为已入库的知识卡片（FTS），不包含未提炼的会话标题。
         </n-tooltip>
 
-        <span v-if="sessions.error" class="text-red-500 flex items-center gap-1 ml-2">
+        <span v-if="sessions.error" class="text-red-500 flex items-center gap-1 ml-2 min-w-0 max-w-64 truncate">
           <span class="i-lucide-alert-circle w-3 h-3" />
           {{ sessions.error }}
         </span>
-        <span v-if="search.searchError" class="text-red-500 flex items-center gap-1 ml-2">
+        <span v-if="search.searchError" class="text-red-500 flex items-center gap-1 ml-2 min-w-0 max-w-64 truncate">
           <span class="i-lucide-alert-circle w-3 h-3" />
           {{ search.searchError }}
         </span>

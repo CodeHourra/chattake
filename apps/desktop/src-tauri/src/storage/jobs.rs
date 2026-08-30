@@ -129,6 +129,19 @@ impl Database {
         Ok(())
     }
 
+    pub fn append_job_item(&self, job_id: &str, item: &NewJobItem<'_>) -> DbResult<String> {
+        let id = Uuid::new_v4().to_string();
+        let mut conn = self.conn();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "INSERT INTO job_items(id,job_id,session_id,source_id,raw_path,status,phase,created_at) VALUES(?1,?2,?3,?4,?5,'running','scanning',?6)",
+            params![id, job_id, item.session_id, item.source_id, item.raw_path, Utc::now().to_rfc3339()],
+        )?;
+        tx.execute("UPDATE jobs SET total=total+1 WHERE id=?1", params![job_id])?;
+        tx.commit()?;
+        Ok(id)
+    }
+
     pub fn mark_item_running(&self, id: &str, phase: &str) -> DbResult<()> {
         self.conn().execute(
             "UPDATE job_items SET status='running',phase=?1,started_at=?2 WHERE id=?3",

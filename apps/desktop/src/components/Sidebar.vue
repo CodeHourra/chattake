@@ -24,6 +24,7 @@ import type { SessionFilterPayload } from '../types'
 import claudeCodeIcon from '../assets/brands/claude-code.png?url'
 import cursorIcon from '../assets/brands/cursor.png?url'
 import codebuddyIcon from '../assets/brands/codebuddy.svg?url'
+import openaiIcon from '../assets/brands/openai.svg?url'
 
 const ui = useUiStore()
 const filters = useFiltersStore()
@@ -53,7 +54,7 @@ const SOURCE_META: Record<string, { label: string; imgIcon?: string; fallbackIco
   'claude-code': { label: 'Claude Code', imgIcon: claudeCodeIcon, fallbackIcon: 'i-lucide-terminal' },
   'cursor': { label: 'Cursor', imgIcon: cursorIcon, fallbackIcon: 'i-lucide-mouse-pointer-click' },
   codebuddy: { label: 'CodeBuddy', imgIcon: codebuddyIcon, fallbackIcon: 'i-lucide-code' },
-  'codebuddy-jetbrains': { label: 'CodeBuddy JB', imgIcon: codebuddyIcon, fallbackIcon: 'i-lucide-braces' },
+  codex: { label: 'Codex', imgIcon: openaiIcon, fallbackIcon: 'i-lucide-code-2' },
 }
 
 function getSourceMeta(sourceId: string) {
@@ -428,7 +429,7 @@ watch(() => ui.activeTab, (tab) => {
 
 <template>
   <!-- min-h-0：参与 flex 布局时让内层 overflow-y-auto 能正确截断高度，单滚动条生效 -->
-  <aside class="shrink-0 flex flex-col min-h-0 w-[260px] bg-white dark:bg-neutral-950 border-r border-slate-200 dark:border-neutral-800 select-none">
+  <aside class="glass-sidebar shrink-0 flex flex-col min-h-0 border-r select-none">
     <div class="flex-1 overflow-y-auto">
 
       <!-- ============== 对话记录模式 ============== -->
@@ -694,6 +695,7 @@ watch(() => ui.activeTab, (tab) => {
 </template>
 
 <style scoped>
+.glass-sidebar { width: clamp(210px, 20vw, 260px); }
 .sidebar-tree :deep(.n-tree-node-content__text) {
   font-size: 13px;
   overflow: hidden;

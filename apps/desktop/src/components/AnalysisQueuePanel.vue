@@ -20,7 +20,7 @@ const statusLabel: Record<string, string> = {
 const phaseLabel: Record<string, string> = {
   queued: '等待执行', scanning: '扫描文件', judging: '价值判断', extracting: '提取知识',
   completed: '处理完成', failed: '处理失败', cancelled: '已取消', interrupted: '异常中断',
-  succeeded: '处理完成',
+  succeeded: '处理完成', imported: '新增导入', updated: '内容更新', skipped: '无变化跳过',
 }
 
 function progress(job: Job) { return job.total ? Math.round(job.done / job.total * 100) : 0 }

@@ -18,11 +18,11 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="h-screen flex flex-col overflow-hidden bg-white text-neutral-900 dark:bg-neutral-950 dark:text-neutral-100">
+  <div class="h-screen flex flex-col overflow-hidden" style="background: var(--paper); color: var(--ink)">
     <TopBar />
     <div class="flex flex-1 min-h-0">
       <Sidebar />
-      <main class="flex-1 min-w-0 min-h-0 overflow-hidden bg-[#fafafa] dark:bg-neutral-950">
+      <main class="flex-1 min-w-0 min-h-0 overflow-hidden" style="background: var(--paper)">
         <router-view />
       </main>
     </div>

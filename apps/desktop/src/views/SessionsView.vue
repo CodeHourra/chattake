@@ -10,6 +10,7 @@ import { useSearchStore } from '../stores/search'
 import { useAnalysisQueueStore } from '../stores/analysisQueue'
 import { api } from '../lib/tauri'
 import { appendDistillHint } from '../lib/distillHints'
+import { getCardTypeLabel } from '@xunji/shared'
 
 const sessions = useSessionsStore()
 const router = useRouter()
@@ -36,6 +37,10 @@ function showToast(msg: string, type: 'success' | 'error' | 'warning' = 'success
   setTimeout(() => {
     toast.value = null
   }, type === 'error' ? 9000 : 4000)
+}
+
+function plainSnippet(value: string | null) {
+  return value?.replace(/<\/?mark>/g, '') ?? ''
 }
 
 // ── 生命周期 ─────────────────────────────────────────────────────────────────
@@ -220,7 +225,13 @@ function openSearchHit(cardId: string, sessionId: string) {
         <div class="flex items-center justify-between gap-3">
           <div class="min-w-0">
             <div class="text-sm font-medium text-slate-800 dark:text-slate-200 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 truncate">{{ c.title }}</div>
-            <div class="text-xs text-slate-500 line-clamp-1 mt-0.5">{{ c.summary }}</div>
+            <div class="flex flex-wrap items-center gap-1.5 mt-1 text-[10px] text-slate-500">
+              <span v-if="c.type">{{ getCardTypeLabel(c.type) }}</span>
+              <span v-if="c.sourceName">· {{ c.sourceName }}</span>
+              <span v-for="tag in c.tags" :key="tag" class="rounded border px-1.5 py-0.5">{{ tag }}</span>
+              <span v-for="tech in c.technologies" :key="tech" class="rounded px-1.5 py-0.5" style="background: var(--pine-soft); color: var(--pine)">{{ tech }}</span>
+            </div>
+            <div class="text-xs text-slate-500 line-clamp-2 mt-1">{{ plainSnippet(c.matchSnippet) || c.summary }}</div>
           </div>
           <span class="i-lucide-arrow-right w-4 h-4 text-slate-400 group-hover:text-emerald-500 shrink-0" />
         </div>
