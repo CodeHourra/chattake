@@ -11,7 +11,7 @@ use crate::storage::Database;
 use crate::AppState;
 
 fn emit_job(app: &AppHandle, db: &Database, job_id: &str) {
-    if let Ok(job) = db.get_job(job_id) {
+    if let Ok(job) = db.get_job_snapshot(job_id) {
         let _ = app.emit("job://updated", job);
     }
 }
@@ -283,12 +283,7 @@ fn start_analysis_internal(
         .create_job(
             "analysis",
             "queued",
-            Some((
-                &profile.id,
-                &profile.provider,
-                target,
-                &profile.model,
-            )),
+            Some((&profile.id, &profile.provider, target, &profile.model)),
             &items,
         )
         .map_err(|error| error.to_string())?;

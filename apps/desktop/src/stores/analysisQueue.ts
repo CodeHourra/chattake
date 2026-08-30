@@ -98,7 +98,7 @@ export const useAnalysisQueueStore = defineStore('analysisQueue', () => {
   }
 
   return {
-    jobs, tasks, currentTask, pendingCount, totalCount, doneCount, hasAny, isIdle,
+    jobs, clock, tasks, currentTask, pendingCount, totalCount, doneCount, hasAny, isIdle,
     progressPercent, initialize, startAnalysis, startSync, cancel, retry, clear, dispose,
   }
 })

@@ -99,6 +99,30 @@ impl Database {
         Ok(job)
     }
 
+    /// 进度事件只携带最近条目，避免每处理一个文件都序列化完整历史。
+    pub fn get_job_snapshot(&self, id: &str) -> DbResult<Job> {
+        let conn = self.read_conn()?;
+        let mut job = conn
+            .query_row(
+                &format!("SELECT {JOB_COLUMNS} FROM jobs WHERE id=?1"),
+                params![id],
+                job_from_row,
+            )
+            .optional()?
+            .ok_or_else(|| DbError::NotFound(format!("job {id}")))?;
+        let item_sql = if job.kind == "sync" {
+            format!("SELECT {ITEM_COLUMNS} FROM job_items WHERE job_id=?1 AND (status='running' OR id IN (SELECT id FROM job_items WHERE job_id=?1 ORDER BY created_at DESC,id DESC LIMIT 50)) ORDER BY created_at DESC,id DESC")
+        } else {
+            format!("SELECT {ITEM_COLUMNS} FROM job_items WHERE job_id=?1 ORDER BY created_at DESC,id DESC")
+        };
+        let mut stmt = conn.prepare(&item_sql)?;
+        job.items = stmt
+            .query_map(params![id], item_from_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        job.items.reverse();
+        Ok(job)
+    }
+
     pub fn list_jobs(&self, active_only: bool) -> DbResult<Vec<Job>> {
         let conn = self.read_conn()?;
         let sql = if active_only {
@@ -303,5 +327,40 @@ mod tests {
             .collect::<Result<_, _>>()
             .unwrap();
         assert!(!columns.iter().any(|column| column == "api_key"));
+    }
+
+    #[test]
+    fn progress_snapshot_caps_file_items() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("jobs.db")).unwrap();
+        let job = db
+            .create_job(
+                "sync",
+                "queued",
+                None,
+                &[NewJobItem {
+                    session_id: None,
+                    source_id: Some("codex"),
+                    raw_path: None,
+                }],
+            )
+            .unwrap();
+        db.mark_item_running(&job.items[0].id, "scanning").unwrap();
+        for index in 0..60 {
+            let item_id = db
+                .append_job_item(
+                    &job.id,
+                    &NewJobItem {
+                        session_id: None,
+                        source_id: Some("codex"),
+                        raw_path: Some(&format!("/tmp/{index}.jsonl")),
+                    },
+                )
+                .unwrap();
+            db.finish_item(&job.id, &item_id, "succeeded", "imported", 0, None)
+                .unwrap();
+        }
+        assert_eq!(db.get_job(&job.id).unwrap().items.len(), 61);
+        assert_eq!(db.get_job_snapshot(&job.id).unwrap().items.len(), 51);
     }
 }
