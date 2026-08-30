@@ -267,3 +267,10 @@ export interface SourceConfigDto {
 export interface SyncConfigDto {
   scanOnStartup: boolean
 }
+
+export interface McpInfo {
+  available: boolean
+  binaryPath: string | null
+  databasePath: string
+  configSnippet: string | null
+}

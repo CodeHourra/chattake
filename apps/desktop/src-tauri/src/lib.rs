@@ -133,6 +133,7 @@ pub fn run() {
             commands::config::save_config,
             commands::config::list_provider_models,
             commands::config::test_provider,
+            commands::mcp::get_mcp_info,
         ])
         .run(context)
         .expect("Tauri 应用启动失败");

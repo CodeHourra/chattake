@@ -7,5 +7,6 @@ pub mod cards;
 pub mod config;
 pub mod export;
 pub mod jobs;
+pub mod mcp;
 pub mod sessions;
 pub mod sidebar;

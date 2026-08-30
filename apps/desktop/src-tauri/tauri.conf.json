@@ -33,7 +33,8 @@
       "icons/128x128@2x.png"
     ],
     "resources": {
-      "../../../packages/sidecar/dist/xunji-sidecar": "xunji-sidecar"
+      "../../../packages/sidecar/dist/xunji-sidecar": "xunji-sidecar",
+      "../../../packages/mcp-server/dist/xunji-mcp": "xunji-mcp"
     },
     "macOS": {
       "bundleName": "寻迹"

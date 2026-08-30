@@ -9,7 +9,7 @@ import { getIdentifier, getTauriVersion, getVersion } from '@tauri-apps/api/app'
 import MarkdownRenderer from './MarkdownRenderer.vue'
 import appChangelogMd from '../data/app-changelog.md?raw'
 import { api } from '../lib/tauri'
-import type { AppConfigDto, SourceConfigDto } from '../types'
+import type { AppConfigDto, McpInfo, SourceConfigDto } from '../types'
 
 const props = defineProps<{ show: boolean }>()
 const emit = defineEmits<{ 'update:show': [value: boolean] }>()
@@ -35,6 +35,9 @@ const modelOptions = ref<Record<string, string[]>>({})
 const aboutMeta = ref<{ version: string; tauriVersion: string; identifier: string } | null>(null)
 const aboutLoading = ref(false)
 const aboutError = ref('')
+const mcpInfo = ref<McpInfo | null>(null)
+const mcpLoading = ref(false)
+const mcpError = ref('')
 
 const selectedProfile = computed(() =>
   workingConfig.value?.distiller.profiles.find((profile) => profile.id === selectedProfileId.value) ?? null,
@@ -46,7 +49,7 @@ const selectedModelOptions = computed(() =>
 
 watch(() => props.show, async (show) => {
   if (!show) return
-  await Promise.all([loadConfig(), loadAboutMeta()])
+  await Promise.all([loadConfig(), loadAboutMeta(), loadMcpInfo()])
 }, { immediate: true })
 
 async function loadConfig() {
@@ -60,6 +63,24 @@ async function loadConfig() {
     errorMsg.value = `配置加载失败：${error}`
   } finally {
     loading.value = false
+  }
+}
+
+async function loadMcpInfo() {
+  mcpLoading.value = true
+  mcpError.value = ''
+  try { mcpInfo.value = await api.getMcpInfo() }
+  catch (error) { mcpError.value = String(error) }
+  finally { mcpLoading.value = false }
+}
+
+async function copyMcpConfig() {
+  if (!mcpInfo.value?.configSnippet) return
+  try {
+    await navigator.clipboard.writeText(mcpInfo.value.configSnippet)
+    successMsg.value = 'MCP 配置片段已复制'
+  } catch (error) {
+    errorMsg.value = `复制失败：${error}`
   }
 }
 
@@ -296,6 +317,27 @@ function close() { emit('update:show', false) }
           </div>
         </n-tab-pane>
 
+        <n-tab-pane name="mcp" tab="MCP">
+          <div class="settings-scroll py-4 space-y-4">
+            <n-alert type="info" :bordered="false" class="!text-xs">
+              MCP 仅以只读方式开放已发布知识，不会暴露草稿、任务、API Key 或供应商配置，也不会自动修改外部应用。
+            </n-alert>
+            <div v-if="mcpLoading" class="flex justify-center py-8"><n-spin /></div>
+            <n-alert v-else-if="mcpError" type="warning">{{ mcpError }}</n-alert>
+            <template v-else-if="mcpInfo">
+              <n-descriptions :column="1" bordered size="small">
+                <n-descriptions-item label="状态"><n-tag :type="mcpInfo.available ? 'success' : 'warning'" size="small">{{ mcpInfo.available ? '可用' : '未构建' }}</n-tag></n-descriptions-item>
+                <n-descriptions-item label="程序路径"><span class="font-mono text-xs break-all">{{ mcpInfo.binaryPath ?? '请先构建 xunji-mcp' }}</span></n-descriptions-item>
+                <n-descriptions-item label="数据库"><span class="font-mono text-xs break-all">{{ mcpInfo.databasePath }}</span></n-descriptions-item>
+              </n-descriptions>
+              <template v-if="mcpInfo.configSnippet">
+                <div class="flex items-center justify-between"><strong class="text-sm">手动配置片段</strong><n-button size="small" secondary @click="copyMcpConfig">复制</n-button></div>
+                <pre class="mcp-config">{{ mcpInfo.configSnippet }}</pre>
+              </template>
+            </template>
+          </div>
+        </n-tab-pane>
+
         <n-tab-pane name="about" tab="关于寻迹">
           <div class="settings-scroll py-4 space-y-4">
             <div class="text-center"><h3 class="text-lg font-semibold">寻迹 XunJi</h3><p class="text-xs text-neutral-500 mt-1">从 AI 编程对话中沉淀可复用知识。</p></div>
@@ -335,6 +377,7 @@ function close() { emit('update:show', false) }
 .active-dot { width: 7px; height: 7px; border-radius: 999px; background: #49685c; box-shadow: 0 0 0 3px rgba(73, 104, 92, .14); }
 .profile-editor { min-width: 0; padding: 4px 4px 12px; }
 .source-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 14px; border: 1px solid var(--n-border-color); border-radius: 12px; }
+.mcp-config { max-height: 220px; overflow: auto; padding: 14px; border: 1px solid var(--n-border-color); border-radius: 10px; background: rgba(73, 104, 92, .06); font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 @media (max-width: 700px) {
   .profile-layout { grid-template-columns: 1fr; }
   .profile-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding-right: 0; padding-bottom: 12px; border-right: 0; border-bottom: 1px solid var(--n-border-color); }

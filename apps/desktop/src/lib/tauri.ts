@@ -24,6 +24,7 @@ import type {
   TagRecord,
   CardUpdatePayload,
   CursorPage,
+  McpInfo,
   TypeCount,
 } from '../types'
 
@@ -142,6 +143,9 @@ export const api = {
   /** 优先测试模型列表；不支持时发送最小 Chat Completions 请求。 */
   testProvider: (profile: ApiProfileDto) =>
     invoke<string>('test_provider', { profile }),
+
+  /** 获取只读 MCP 的可用状态、路径与手动配置片段。 */
+  getMcpInfo: () => invoke<McpInfo>('get_mcp_info'),
 
   /** 单条笔记导出为 Markdown（路径由系统「另存为」决定） */
   exportCardMarkdown: (cardId: string, filePath: string) =>

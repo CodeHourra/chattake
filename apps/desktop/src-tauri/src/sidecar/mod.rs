@@ -47,60 +47,76 @@ impl SidecarManager {
     ///
     /// `package_info` 来自 [`tauri::generate_context!`]，用于与 Tauri CLI 相同的 `resource_dir` 解析（跨平台）。
     pub fn find_binary(package_info: &PackageInfo) -> Option<PathBuf> {
-        let env = Env::default();
-
-        // 1) 开发模式：从 packages/sidecar/dist/ 加载
-        // CARGO_MANIFEST_DIR = .../apps/desktop/src-tauri
-        // parent×3: src-tauri → desktop → apps → xunji root
-        // Bun `--compile` 在 Windows 上产出 `xunji-sidecar.exe`，与 Unix 无后缀名不同
-        let dev_sidecar_name = if cfg!(target_os = "windows") {
-            "xunji-sidecar.exe"
-        } else {
-            "xunji-sidecar"
-        };
-        let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .and_then(|p| p.parent())
-            .and_then(|p| p.parent())
-            .map(|p| p.join("packages/sidecar/dist").join(dev_sidecar_name));
-
-        if let Some(ref path) = dev_path {
-            if path.exists() {
-                log::info!("使用开发模式 sidecar: {}", path.display());
-                return Some(path.clone());
-            }
-        }
-
-        // 2) 安装包内：macOS/Linux 为 `xunji-sidecar`，Windows 为 `xunji-sidecar.exe`（见 tauri.windows.conf.json）
-        if let Ok(dir) = resource_dir(package_info, &env) {
-            let bundled = if cfg!(target_os = "windows") {
-                dir.join("xunji-sidecar.exe")
-            } else {
-                dir.join("xunji-sidecar")
-            };
-            if bundled.exists() {
-                log::info!("使用安装包内 sidecar: {}", bundled.display());
-                return Some(bundled);
-            }
-        }
-
-        // 3) 全局安装位置（可选覆盖）
-        if let Some(home) = dirs::home_dir() {
-            let global_path = if cfg!(target_os = "windows") {
-                home.join(".xunji/bin/xunji-sidecar.exe")
-            } else {
-                home.join(".xunji/bin/xunji-sidecar")
-            };
-            if global_path.exists() {
-                log::info!("使用全局 sidecar: {}", global_path.display());
-                return Some(global_path);
-            }
-        }
-
-        log::warn!("未找到 sidecar 二进制文件");
-        None
+        find_companion_binary(package_info, "xunji-sidecar", "sidecar")
     }
 
+    /// 查找开发目录、安装包资源或用户目录中的伴随二进制。
+    pub fn find_companion_binary(
+        package_info: &PackageInfo,
+        binary_name: &str,
+        package_dir: &str,
+    ) -> Option<PathBuf> {
+        find_companion_binary(package_info, binary_name, package_dir)
+    }
+}
+
+fn find_companion_binary(
+    package_info: &PackageInfo,
+    binary_name: &str,
+    package_dir: &str,
+) -> Option<PathBuf> {
+    let env = Env::default();
+
+    // 1) 开发模式：从 packages/sidecar/dist/ 加载
+    // CARGO_MANIFEST_DIR = .../apps/desktop/src-tauri
+    // parent×3: src-tauri → desktop → apps → xunji root
+    // Bun `--compile` 在 Windows 上产出 `xunji-sidecar.exe`，与 Unix 无后缀名不同
+    let file_name = if cfg!(target_os = "windows") {
+        format!("{binary_name}.exe")
+    } else {
+        binary_name.to_string()
+    };
+    let dev_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
+        .map(|p| {
+            p.join("packages")
+                .join(package_dir)
+                .join("dist")
+                .join(&file_name)
+        });
+
+    if let Some(ref path) = dev_path {
+        if path.exists() {
+            log::info!("使用开发模式伴随程序: {}", path.display());
+            return Some(path.clone());
+        }
+    }
+
+    // 2) 安装包内：macOS/Linux 为 `xunji-sidecar`，Windows 为 `xunji-sidecar.exe`（见 tauri.windows.conf.json）
+    if let Ok(dir) = resource_dir(package_info, &env) {
+        let bundled = dir.join(&file_name);
+        if bundled.exists() {
+            log::info!("使用安装包内 sidecar: {}", bundled.display());
+            return Some(bundled);
+        }
+    }
+
+    // 3) 全局安装位置（可选覆盖）
+    if let Some(home) = dirs::home_dir() {
+        let global_path = home.join(".xunji/bin").join(&file_name);
+        if global_path.exists() {
+            log::info!("使用全局 sidecar: {}", global_path.display());
+            return Some(global_path);
+        }
+    }
+
+    log::warn!("未找到伴随程序: {binary_name}");
+    None
+}
+
+impl SidecarManager {
     /// 启动 sidecar 进程
     pub fn start(&self) -> Result<(), RpcError> {
         let mut proc_guard = self
