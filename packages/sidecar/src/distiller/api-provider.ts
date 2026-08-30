@@ -32,6 +32,12 @@ export interface DistillResult {
   completionTokens: number
 }
 
+export class ModelListHttpError extends Error {
+  constructor(readonly status: number, body: string) {
+    super(`HTTP ${status}: ${body}`)
+  }
+}
+
 export async function listApiModels(config: ApiProviderConfig): Promise<string[]> {
   const url = new URL(`${config.baseUrl.replace(/\/$/, '')}/models`)
   if (config.provider === 'siliconflow') {
@@ -42,7 +48,7 @@ export async function listApiModels(config: ApiProviderConfig): Promise<string[]
     headers: { Authorization: `Bearer ${config.apiKey}` },
     signal: AbortSignal.timeout(config.timeoutMs ?? 30_000),
   })
-  if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`)
+  if (!response.ok) throw new ModelListHttpError(response.status, await response.text())
   const body = await response.json() as { data?: Array<{ id?: unknown }> }
   return (body.data ?? [])
     .map((item) => typeof item.id === 'string' ? item.id : '')

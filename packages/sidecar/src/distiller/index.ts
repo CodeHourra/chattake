@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto'
 
 import { preprocess } from './preprocessor'
 import { PROMPT_EXTRACT_KNOWLEDGE, PROMPT_JUDGE_VALUE } from './prompts'
-import { ApiProvider, listApiModels, type ApiProviderConfig, type DistillResult } from './api-provider'
+import { ApiProvider, listApiModels, ModelListHttpError, type ApiProviderConfig, type DistillResult } from './api-provider'
 import { CliProvider, testCliProvider, type CliProviderConfig } from './cli-provider'
 import { normalizeLlmTags, normalizeLlmTechStack } from './tech-tags'
 import { distillLog, resolveTraceId } from './trace'
@@ -367,7 +367,6 @@ function parseCliConfig(params: Record<string, unknown>): CliProviderConfig {
   return {
     provider: typeof params.provider === 'string' ? params.provider : 'custom-cli',
     command: params.command,
-    args: Array.isArray(params.args) ? params.args.filter((arg): arg is string => typeof arg === 'string') : [],
     model: typeof params.model === 'string' ? params.model : undefined,
     timeoutMs: typeof params.timeout_secs === 'number' ? params.timeout_secs * 1000 : undefined,
   }
@@ -399,6 +398,9 @@ export async function handleTestProvider(params: Record<string, unknown>): Promi
     await listApiModels(config)
     return '模型列表接口连接成功'
   } catch (modelsError) {
+    if (!(modelsError instanceof ModelListHttpError) || ![404, 405, 501].includes(modelsError.status)) {
+      throw modelsError
+    }
     if (!config.model.trim()) throw modelsError
     await new ApiProvider(config).testConnection()
     return '最小 Chat Completions 请求成功（供应商未提供可用的模型列表接口）'

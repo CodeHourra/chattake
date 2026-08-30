@@ -242,7 +242,11 @@ pub(crate) fn run_distill_pipeline(
     let mut reason: Option<String> = None;
     let mut judge_tokens = (0, 0);
     let mut extract_tokens = (0, 0);
+    let model_timeout = std::time::Duration::from_secs(profile.timeout_secs.saturating_add(5));
     let result = (|| -> Result<(), String> {
+        if let Some(callback) = on_phase {
+            callback("preparing");
+        }
         let processed: PreprocessResult = sidecar
             .call_with_timeout(
                 "preprocess",
@@ -258,7 +262,7 @@ pub(crate) fn run_distill_pipeline(
             .call_with_timeout(
                 "judge_value",
                 serde_json::json!({ "content": processed.content, "traceId": trace_id }),
-                std::time::Duration::from_secs(120),
+                model_timeout,
             )
             .map_err(|e| format!("价值判断失败：{e}"))?;
 
@@ -289,13 +293,17 @@ pub(crate) fn run_distill_pipeline(
             .call_with_timeout(
                 "extract_knowledge",
                 serde_json::json!({ "content": processed.content, "traceId": trace_id }),
-                std::time::Duration::from_secs(300),
+                model_timeout,
             )
             .map_err(|e| format!("知识提取失败：{e}"))?;
         if extracted.items.is_empty() || extracted.items.len() > 3 {
             return Err("响应格式错误：知识项数量必须为 1–3".into());
         }
         extract_tokens = (extracted.prompt_tokens, extracted.completion_tokens);
+
+        if let Some(callback) = on_phase {
+            callback("saving");
+        }
 
         let source_name = config.source_display_name(&session.source_id);
         let project_name = session.project_name.clone();

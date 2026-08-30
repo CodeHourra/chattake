@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -64,7 +65,6 @@ impl Default for DistillerConfig {
                 api_key: String::new(),
                 model: String::new(),
                 command: String::new(),
-                args: Vec::new(),
                 timeout_secs: default_timeout(),
             }],
             legacy_api: None,
@@ -88,8 +88,6 @@ pub struct ProviderProfile {
     pub model: String,
     #[serde(default)]
     pub command: String,
-    #[serde(default)]
-    pub args: Vec<String>,
     #[serde(default = "default_timeout")]
     pub timeout_secs: u64,
 }
@@ -221,6 +219,8 @@ impl AppConfig {
         if changed {
             config.save(&config_path)?;
         }
+        #[cfg(unix)]
+        Self::secure_permissions(&config_path)?;
         Ok(config)
     }
 
@@ -265,7 +265,6 @@ impl AppConfig {
                         api_key: api.api_key,
                         model: api.model,
                         command: String::new(),
-                        args: Vec::new(),
                         timeout_secs: api.timeout_secs,
                     }],
                     legacy_api: None,
@@ -288,7 +287,9 @@ impl AppConfig {
 
     pub fn validate(&self) -> ConfigResult<()> {
         if self.distiller.profiles.is_empty() {
-            return Err(ConfigError::Invalid("至少需要一套分析 Provider 配置".to_string()));
+            return Err(ConfigError::Invalid(
+                "至少需要一套分析 Provider 配置".to_string(),
+            ));
         }
         let mut ids = HashSet::new();
         for profile in &self.distiller.profiles {
@@ -335,7 +336,37 @@ impl AppConfig {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        fs::write(path, toml::to_string_pretty(self)?)?;
+        let contents = toml::to_string_pretty(self)?;
+        let mut options = fs::OpenOptions::new();
+        options.create(true).write(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(path)?;
+        file.write_all(contents.as_bytes())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(fs::Permissions::from_mode(0o600))?;
+        }
+        #[cfg(unix)]
+        Self::secure_permissions(path)?;
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    fn secure_permissions(path: &Path) -> ConfigResult<()> {
+        use std::os::unix::fs::PermissionsExt;
+
+        if let Some(parent) = path
+            .parent()
+            .filter(|p| p.file_name().and_then(|v| v.to_str()) == Some(".chattake"))
+        {
+            fs::set_permissions(parent, fs::Permissions::from_mode(0o700))?;
+        }
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
         Ok(())
     }
 
@@ -374,7 +405,6 @@ impl AppConfig {
                 "kind": "cli",
                 "provider": profile.provider,
                 "command": profile.command,
-                "args": profile.args,
                 "model": profile.model,
                 "timeout_secs": profile.timeout_secs,
             }));
@@ -383,7 +413,10 @@ impl AppConfig {
             return Err(format!("API Provider「{}」尚未填写 API Key", profile.name));
         }
         if profile.base_url.trim().is_empty() || profile.model.trim().is_empty() {
-            return Err(format!("API Provider「{}」缺少 Base URL 或模型", profile.name));
+            return Err(format!(
+                "API Provider「{}」缺少 Base URL 或模型",
+                profile.name
+            ));
         }
         Ok(serde_json::json!({
             "kind": "api",
@@ -427,7 +460,10 @@ mod tests {
             .iter()
             .map(|s| s.id.as_str())
             .collect();
-        assert_eq!(ids, vec!["claude-code", "cursor", "codex", "codebuddy", "omp", "pi"]);
+        assert_eq!(
+            ids,
+            vec!["claude-code", "cursor", "codex", "codebuddy", "omp", "pi"]
+        );
         assert_eq!(config.distiller.profiles.len(), 1);
         assert_eq!(config.distiller.active_profile_id, "default");
         assert!(config.sync.scan_on_startup);
@@ -445,7 +481,6 @@ mod tests {
             api_key: "sk-test".to_string(),
             model: "deepseek-ai/DeepSeek-V3".to_string(),
             command: String::new(),
-            args: Vec::new(),
             timeout_secs: 90,
         });
         config.distiller.active_profile_id = "siliconflow-main".to_string();
@@ -454,6 +489,37 @@ mod tests {
         let selected = parsed.provider_profile(None).unwrap();
         assert_eq!(selected.provider, "siliconflow");
         assert_eq!(selected.timeout_secs, 90);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saves_private_config_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let config_dir = dir.path().join(".chattake");
+        let path = config_dir.join("config.toml");
+        AppConfig::default().save(&path).unwrap();
+        assert_eq!(
+            fs::metadata(&config_dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+
+        fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        AppConfig::load(Some(&path)).unwrap();
+        assert_eq!(
+            fs::metadata(&config_dir).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 
     #[test]
@@ -486,7 +552,10 @@ interval_secs = 300
         let mut config: AppConfig = toml::from_str(text).unwrap();
         assert!(config.normalize());
         assert_eq!(config.distiller.active_profile_id, "migrated-api");
-        assert_eq!(config.provider_profile(None).unwrap().model, "deepseek-chat");
+        assert_eq!(
+            config.provider_profile(None).unwrap().model,
+            "deepseek-chat"
+        );
         assert!(!toml::to_string(&config)
             .unwrap()
             .contains("[distiller.api]"));

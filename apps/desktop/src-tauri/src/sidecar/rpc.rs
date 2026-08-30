@@ -9,7 +9,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{ChildStdin, ChildStdout};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -19,6 +19,7 @@ const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
 /// JSON-RPC 2.0 客户端，持有 sidecar 进程的 stdin/stdout
 pub struct RpcClient {
+    calls: Mutex<()>,
     stdin: Mutex<ChildStdin>,
     responses: Mutex<mpsc::Receiver<Result<String, String>>>,
     request_id: AtomicU64,
@@ -51,6 +52,7 @@ impl RpcClient {
             }
         });
         Self {
+            calls: Mutex::new(()),
             stdin: Mutex::new(stdin),
             responses: Mutex::new(rx),
             request_id: AtomicU64::new(1),
@@ -78,6 +80,11 @@ impl RpcClient {
         params: Value,
         timeout: Duration,
     ) -> Result<T, RpcError> {
+        // Sidecar 允许并发处理请求，但桌面端当前不需要并发；整体串行可避免响应串线。
+        let _call_guard = self
+            .calls
+            .lock()
+            .map_err(|_| RpcError::Internal("call lock poisoned".into()))?;
         let id = self.request_id.fetch_add(1, Ordering::SeqCst);
 
         let request = serde_json::json!({
@@ -107,21 +114,32 @@ impl RpcClient {
             stdin.flush().map_err(|e| RpcError::Io(e.to_string()))?;
         }
 
-        // 读 stdout，通过独立线程 + channel 实现超时控制
-        let response_str = self.read_response_with_timeout(timeout)?;
-
-        if response_str.trim().is_empty() {
-            return Err(RpcError::Io("Sidecar 返回空响应（进程可能已退出）".into()));
-        }
-
-        // 解析响应
-        let response: Value = serde_json::from_str(response_str.trim()).map_err(|e| {
-            RpcError::Deserialize(format!(
-                "响应解析失败: {} - {}",
-                e,
-                &response_str[..response_str.len().min(200)]
-            ))
-        })?;
+        // 超时请求的迟到响应可能仍在队列中；按 id 丢弃，直到拿到本次响应。
+        let deadline = Instant::now() + timeout;
+        let response = loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(RpcError::Timeout(timeout.as_secs()));
+            }
+            let response_str = self.read_response_with_timeout(remaining)?;
+            if response_str.trim().is_empty() {
+                return Err(RpcError::Io("Sidecar 返回空响应（进程可能已退出）".into()));
+            }
+            let response: Value = serde_json::from_str(response_str.trim()).map_err(|e| {
+                RpcError::Deserialize(format!(
+                    "响应解析失败: {} - {}",
+                    e,
+                    &response_str[..response_str.len().min(200)]
+                ))
+            })?;
+            if response.get("id").and_then(Value::as_u64) == Some(id) {
+                break response;
+            }
+            log::warn!(
+                "丢弃非当前 RPC 响应: expected_id={id}, actual_id={:?}",
+                response.get("id")
+            );
+        };
 
         // 检查 error 字段
         if let Some(err) = response.get("error") {

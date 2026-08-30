@@ -35,7 +35,6 @@ pub struct ProviderProfileDto {
     pub api_key: String,
     pub model: String,
     pub command: String,
-    pub args: Vec<String>,
     pub timeout_secs: u64,
 }
 
@@ -103,7 +102,6 @@ impl From<&ProviderProfile> for ProviderProfileDto {
             api_key: p.api_key.clone(),
             model: p.model.clone(),
             command: p.command.clone(),
-            args: p.args.clone(),
             timeout_secs: p.timeout_secs,
         }
     }
@@ -120,7 +118,6 @@ impl From<ProviderProfileDto> for ProviderProfile {
             api_key: p.api_key,
             model: p.model,
             command: p.command,
-            args: p.args,
             timeout_secs: p.timeout_secs,
         }
     }
@@ -167,7 +164,7 @@ fn profile_params(profile: ProviderProfileDto) -> Result<serde_json::Value, Stri
         }
         return Ok(serde_json::json!({
             "kind": "cli", "provider": profile.provider, "command": profile.command,
-            "args": profile.args, "model": profile.model, "timeout_secs": profile.timeout_secs,
+            "model": profile.model, "timeout_secs": profile.timeout_secs,
         }));
     }
     if profile.api_key.trim().is_empty() || profile.base_url.trim().is_empty() {
@@ -214,13 +211,12 @@ pub async fn list_provider_models(
     profile: ProviderProfileDto,
 ) -> Result<Vec<String>, String> {
     let sidecar = state.sidecar.as_ref().ok_or("Sidecar 未就绪")?.clone();
+    let timeout = Duration::from_secs(profile.timeout_secs.saturating_add(5));
     let params = profile_params(profile)?;
-    tokio::task::spawn_blocking(move || {
-        sidecar.call_with_timeout("list_models", params, Duration::from_secs(30))
-    })
-    .await
-    .map_err(|e| format!("模型列表任务失败：{e}"))?
-    .map_err(|e| format!("模型列表加载失败：{e}"))
+    tokio::task::spawn_blocking(move || sidecar.call_with_timeout("list_models", params, timeout))
+        .await
+        .map_err(|e| format!("模型列表任务失败：{e}"))?
+        .map_err(|e| format!("模型列表加载失败：{e}"))
 }
 
 #[tauri::command]
@@ -229,13 +225,12 @@ pub async fn test_provider(
     profile: ProviderProfileDto,
 ) -> Result<String, String> {
     let sidecar = state.sidecar.as_ref().ok_or("Sidecar 未就绪")?.clone();
+    let timeout = Duration::from_secs(profile.timeout_secs.saturating_add(5));
     let params = profile_params(profile)?;
-    tokio::task::spawn_blocking(move || {
-        sidecar.call_with_timeout("test_provider", params, Duration::from_secs(30))
-    })
-    .await
-    .map_err(|e| format!("连接测试任务失败：{e}"))?
-    .map_err(|e| format!("连接测试失败：{e}"))
+    tokio::task::spawn_blocking(move || sidecar.call_with_timeout("test_provider", params, timeout))
+        .await
+        .map_err(|e| format!("连接测试任务失败：{e}"))?
+        .map_err(|e| format!("连接测试失败：{e}"))
 }
 
 #[cfg(test)]
@@ -253,7 +248,6 @@ mod tests {
             api_key: "secret".into(),
             model: "deepseek-ai/DeepSeek-V3".into(),
             command: String::new(),
-            args: Vec::new(),
             timeout_secs: 120,
         })
         .unwrap();

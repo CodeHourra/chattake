@@ -252,7 +252,6 @@ export interface ProviderProfileDto {
   apiKey: string
   model: string
   command: string
-  args: string[]
   timeoutSecs: number
 }
 

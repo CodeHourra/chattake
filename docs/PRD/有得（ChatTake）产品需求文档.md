@@ -316,7 +316,6 @@ model    = "claude-3-5-sonnet-20241022"
 ```toml
 [distiller.cli]
 command      = "claude"
-args         = ["--print", "--yes"]
 timeout_secs = 120
 ```
 

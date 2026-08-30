@@ -118,7 +118,7 @@ function addProfile(provider = 'openai') {
   config.distiller.profiles.push({
     id, name: preset.label.replace(/^(API|CLI) · /, ''), kind: preset.kind,
     provider: preset.value, baseUrl: preset.baseUrl, apiKey: '', model: '',
-    command: preset.command, args: [], timeoutSecs: 120,
+    command: preset.command, timeoutSecs: 120,
   })
   selectedProfileId.value = id
 }
@@ -127,7 +127,7 @@ function copyProfile() {
   const config = workingConfig.value
   const profile = selectedProfile.value
   if (!config || !profile) return
-  const copy = { ...profile, args: [...profile.args], id: makeId(), name: `${profile.name} 副本` }
+  const copy = { ...profile, id: makeId(), name: `${profile.name} 副本` }
   config.distiller.profiles.push(copy)
   selectedProfileId.value = copy.id
 }
@@ -296,13 +296,6 @@ function close() { emit('update:show', false) }
                       <n-input v-model:value="selectedProfile.command" placeholder="命令名或可执行文件绝对路径" />
                       <n-button secondary @click="chooseCommand">选择</n-button>
                     </div>
-                  </n-form-item>
-                  <n-form-item v-if="selectedProfile.kind === 'cli'" label="附加参数">
-                    <n-input
-                      :value="selectedProfile.args.join(' ')"
-                      placeholder="可选；使用空格分隔，不经过 shell"
-                      @update:value="selectedProfile.args = $event.trim() ? $event.trim().split(/\s+/) : []"
-                    />
                   </n-form-item>
                   <n-form-item label="模型">
                     <div class="flex gap-2 w-full">

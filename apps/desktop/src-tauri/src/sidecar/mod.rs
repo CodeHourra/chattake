@@ -181,6 +181,18 @@ impl SidecarManager {
             if !terminated {
                 let _ = child.kill();
             }
+            if terminated {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+                while std::time::Instant::now() < deadline {
+                    if child.try_wait().ok().flatten().is_some() {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                if child.try_wait().ok().flatten().is_none() {
+                    let _ = child.kill();
+                }
+            }
             let _ = child.wait();
         }
 

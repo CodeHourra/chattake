@@ -29,7 +29,6 @@ name = "本地 Codex"
 kind = "cli"
 provider = "codex"
 command = "codex"
-args = []
 model = ""
 timeout_secs = 120
 

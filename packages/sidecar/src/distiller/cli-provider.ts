@@ -9,16 +9,33 @@ import type { DistillResult } from './api-provider'
 export interface CliProviderConfig {
   provider: string
   command: string
-  args?: string[]
   model?: string
   timeoutMs?: number
 }
 
 type InputMode = 'stdin' | 'file'
-let activeProcess: { kill(): void } | null = null
+type ActiveProcess = { pid: number; exited: Promise<number>; kill(signal?: number): void }
+let activeProcess: ActiveProcess | null = null
 
-process.on('SIGTERM', () => {
-  activeProcess?.kill()
+function killProcess(proc: ActiveProcess, signal: NodeJS.Signals | number): void {
+  if (process.platform !== 'win32') {
+    try {
+      process.kill(-proc.pid, signal)
+      return
+    } catch {}
+  }
+  proc.kill(typeof signal === 'number' ? signal : signal === 'SIGKILL' ? 9 : 15)
+}
+
+process.on('SIGTERM', async () => {
+  const proc = activeProcess
+  if (proc) {
+    let exited = false
+    void proc.exited.then(() => { exited = true })
+    killProcess(proc, 'SIGTERM')
+    await Bun.sleep(500)
+    if (!exited) killProcess(proc, 'SIGKILL')
+  }
   process.exit(143)
 })
 
@@ -27,40 +44,39 @@ export function buildCliInvocation(
   promptPath?: string,
 ): { args: string[]; inputMode: InputMode } {
   const model = config.model?.trim()
-  const extra = config.args ?? []
   switch (config.provider) {
     case 'claude-code':
       return {
-        args: ['-p', '--output-format', 'text', '--no-session-persistence', '--tools', '', '--permission-mode', 'dontAsk', ...(model ? ['--model', model] : []), ...extra],
+        args: ['-p', '--output-format', 'text', '--no-session-persistence', '--tools', '', '--permission-mode', 'dontAsk', ...(model ? ['--model', model] : [])],
         inputMode: 'stdin',
       }
     case 'codex':
       return {
-        args: ['exec', '--ephemeral', '--skip-git-repo-check', '--ignore-rules', '--ignore-user-config', '-s', 'read-only', '--color', 'never', ...(model ? ['-m', model] : []), ...extra, '-'],
+        args: ['exec', '--ephemeral', '--skip-git-repo-check', '--ignore-rules', '--ignore-user-config', '-s', 'read-only', '--color', 'never', ...(model ? ['-m', model] : []), '-'],
         inputMode: 'stdin',
       }
     case 'cursor':
       return {
-        args: ['-p', '--output-format', 'text', '--mode', 'ask', '--sandbox', 'enabled', '--trust', ...(model ? ['--model', model] : []), ...extra],
+        args: ['-p', '--output-format', 'text', '--mode', 'ask', '--sandbox', 'enabled', '--trust', ...(model ? ['--model', model] : [])],
         inputMode: 'stdin',
       }
     case 'omp':
       return {
-        args: ['-p', '--mode', 'text', '--no-session', '--no-tools', '--no-extensions', '--no-skills', '--no-rules', '--no-title', ...(model ? ['--model', model] : []), ...extra, `@${promptPath ?? ''}`],
+        args: ['-p', '--mode', 'text', '--no-session', '--no-tools', '--no-extensions', '--no-skills', '--no-rules', '--no-title', ...(model ? ['--model', model] : []), `@${promptPath ?? ''}`],
         inputMode: 'file',
       }
     case 'pi':
       return {
-        args: ['-p', '--mode', 'text', '--no-session', '--no-tools', '--no-extensions', '--no-skills', '--no-prompt-templates', '--no-context-files', ...(model ? ['--model', model] : []), ...extra, `@${promptPath ?? ''}`],
+        args: ['-p', '--mode', 'text', '--no-session', '--no-tools', '--no-extensions', '--no-skills', '--no-prompt-templates', '--no-context-files', ...(model ? ['--model', model] : []), `@${promptPath ?? ''}`],
         inputMode: 'file',
       }
     case 'codebuddy':
       return {
-        args: ['-p', '--output-format', 'text', '--no-session-persistence', '--tools', '', '--permission-mode', 'dontAsk', ...(model ? ['--model', model] : []), ...extra],
+        args: ['-p', '--output-format', 'text', '--no-session-persistence', '--tools', '', '--permission-mode', 'dontAsk', ...(model ? ['--model', model] : [])],
         inputMode: 'stdin',
       }
     default:
-      return { args: [...extra], inputMode: 'stdin' }
+      return { args: [], inputMode: 'stdin' }
   }
 }
 
@@ -94,6 +110,7 @@ async function run(
   timeoutMs: number,
 ): Promise<string> {
   const proc = Bun.spawn([command, ...args], {
+    detached: process.platform !== 'win32',
     stdin: input === null ? 'ignore' : 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
@@ -104,15 +121,25 @@ async function run(
     proc.stdin.write(input)
     proc.stdin.end()
   }
-  const timer = setTimeout(() => proc.kill(), timeoutMs)
+  let timedOut = false
+  let killTimer: ReturnType<typeof setTimeout> | null = null
+  const timer = setTimeout(() => {
+    timedOut = true
+    killProcess(proc, 'SIGTERM')
+    killTimer = setTimeout(() => killProcess(proc, 'SIGKILL'), 500)
+  }, timeoutMs)
   const [exitCode, stdout, stderr] = await Promise.all([
     proc.exited,
     new Response(proc.stdout).text(),
     new Response(proc.stderr).text(),
   ]).finally(() => {
     clearTimeout(timer)
+    if (killTimer) clearTimeout(killTimer)
     activeProcess = null
   })
+  if (timedOut) {
+    throw new Error(`${basename(command)} 请求超时（${Math.ceil(timeoutMs / 1000)} 秒）`)
+  }
   if (exitCode !== 0) {
     throw new Error(`${basename(command)} 退出码 ${exitCode}：${stderr.trim().slice(0, 800) || '无错误输出'}`)
   }
