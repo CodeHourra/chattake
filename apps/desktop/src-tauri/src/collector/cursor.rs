@@ -21,7 +21,10 @@ use rusqlite::Connection;
 
 use crate::path_local::decode_cursor_folder_to_local_path;
 
-use super::normalizer::{file_fingerprint, NormalizedMessage, NormalizedSession};
+use super::normalizer::{
+    file_fingerprint, normalize_user_content, CollectionBatch, CollectionFailure,
+    NormalizedMessage, NormalizedSession,
+};
 
 /// Cursor 数据采集器
 pub struct CursorCollector {
@@ -37,14 +40,14 @@ impl CursorCollector {
     /// 扫描所有配置的目录，返回解析后的标准化会话列表
     #[cfg(test)]
     pub fn collect(&self) -> Vec<NormalizedSession> {
-        self.collect_changed(|_, _, _| false)
+        self.collect_changed(|_, _, _| false).sessions
     }
 
-    pub fn collect_changed<F>(&self, unchanged: F) -> Vec<NormalizedSession>
+    pub fn collect_changed<F>(&self, unchanged: F) -> CollectionBatch
     where
         F: Fn(&Path, i64, i64) -> bool,
     {
-        let mut all_sessions = Vec::new();
+        let mut batch = CollectionBatch::default();
 
         for base_dir in &self.scan_dirs {
             let global_db_path = base_dir
@@ -60,31 +63,41 @@ impl CursorCollector {
                 );
                 continue;
             }
+            batch.found += 1;
             let (raw_mtime_ms, raw_size_bytes) = match sqlite_fingerprint(&global_db_path) {
                 Some(fingerprint) => fingerprint,
                 None => continue,
             };
             if unchanged(&global_db_path, raw_mtime_ms, raw_size_bytes) {
+                batch.skipped += 1;
+                batch
+                    .skipped_paths
+                    .push(global_db_path.to_string_lossy().into_owned());
                 continue;
             }
 
             match self.collect_from_dir(&global_db_path, &ws_base, raw_mtime_ms, raw_size_bytes) {
-                Ok(mut sessions) => {
+                Ok(mut found) => {
                     log::info!(
                         "从 {} 扫描到 {} 个 Cursor 会话",
                         base_dir.display(),
-                        sessions.len()
+                        found.sessions.len()
                     );
-                    all_sessions.append(&mut sessions);
+                    batch.sessions.append(&mut found.sessions);
+                    batch.failures.append(&mut found.failures);
+                    batch.skipped_paths.append(&mut found.skipped_paths);
                 }
                 Err(e) => {
-                    log::error!("扫描 Cursor 目录失败: {} - {}", base_dir.display(), e);
+                    batch.failures.push(CollectionFailure {
+                        raw_path: global_db_path.to_string_lossy().into_owned(),
+                        error: e.to_string(),
+                    });
                 }
             }
         }
 
-        log::info!("Cursor 采集完成，共 {} 个会话", all_sessions.len());
-        all_sessions
+        log::info!("Cursor 采集完成，共 {} 个会话", batch.sessions.len());
+        batch
     }
 
     /// 从单个 Cursor 安装目录采集会话
@@ -94,7 +107,7 @@ impl CursorCollector {
         ws_base: &Path,
         raw_mtime_ms: i64,
         raw_size_bytes: i64,
-    ) -> Result<Vec<NormalizedSession>, Box<dyn std::error::Error>> {
+    ) -> Result<CollectionBatch, Box<dyn std::error::Error>> {
         // Step 1: 扫描所有 workspace，建立 composerId → (project_path, name) 映射
         let workspace_map = scan_workspaces(ws_base)?;
         log::debug!("发现 {} 个 workspace", workspace_map.len());
@@ -105,7 +118,7 @@ impl CursorCollector {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
 
-        let mut sessions = Vec::new();
+        let mut batch = CollectionBatch::default();
 
         // 遍历所有 workspace 中的 composer
         for (composer_id, ws_info) in &workspace_map {
@@ -118,18 +131,21 @@ impl CursorCollector {
                 raw_size_bytes,
             ) {
                 Ok(Some(session)) => {
-                    sessions.push(session);
+                    batch.sessions.push(session);
                 }
                 Ok(None) => {
                     // 会话无有效消息，跳过
                 }
                 Err(e) => {
-                    log::warn!("读取 Cursor 会话失败: {} - {}", composer_id, e);
+                    batch.failures.push(CollectionFailure {
+                        raw_path: format!("{}#{}", global_db_path.display(), composer_id),
+                        error: e.to_string(),
+                    });
                 }
             }
         }
 
-        Ok(sessions)
+        Ok(batch)
     }
 }
 
@@ -346,6 +362,14 @@ fn read_composer_session(
         if content.trim().is_empty() {
             continue;
         }
+        let content = if role == "user" {
+            match normalize_user_content(&content) {
+                Some(content) => content,
+                None => continue,
+            }
+        } else {
+            content
+        };
 
         let token_count = &bubble_data["tokenCount"];
         let tokens_in = token_count["inputTokens"].as_u64().unwrap_or(0) as u32;

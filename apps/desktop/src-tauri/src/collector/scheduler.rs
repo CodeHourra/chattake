@@ -25,7 +25,7 @@ use super::claude_code::ClaudeCodeCollector;
 use super::codebuddy::CodeBuddyCollector;
 use super::codex::CodexCollector;
 use super::cursor::CursorCollector;
-use super::normalizer::NormalizedSession;
+use super::normalizer::{CollectionBatch, NormalizedSession};
 
 /// 同步结果统计
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -68,7 +68,7 @@ impl<'a> CollectorScheduler<'a> {
         };
         log::info!("开始采集数据源: {} ({})", source.name, source.id);
         let scan_dirs = source.resolved_scan_dirs();
-        let sessions: Vec<NormalizedSession> = match source.id.as_str() {
+        let batch: CollectionBatch = match source.id.as_str() {
             "claude-code" => {
                 let collector = ClaudeCodeCollector::new(scan_dirs);
                 collector.collect_changed(|path, mtime, size| {
@@ -118,7 +118,16 @@ impl<'a> CollectorScheduler<'a> {
             }
         };
 
-        let result = self.dedup_and_write(&sessions, &mut on_file);
+        for path in &batch.skipped_paths {
+            on_file(path, "skipped", None);
+        }
+        for failure in &batch.failures {
+            on_file(&failure.raw_path, "failed", Some(&failure.error));
+        }
+        let mut result = self.dedup_and_write(&batch.sessions, &mut on_file);
+        result.found = batch.found;
+        result.skipped += batch.skipped;
+        result.failed += batch.failures.len() as u32;
         log::info!(
             "数据源 {} 采集完成: 发现={}, 新增={}, 更新={}, 跳过={}",
             source.name,
@@ -141,10 +150,7 @@ impl<'a> CollectorScheduler<'a> {
         sessions: &[NormalizedSession],
         on_file: &mut impl FnMut(&str, &str, Option<&str>),
     ) -> SyncResult {
-        let mut result = SyncResult {
-            found: sessions.len() as u32,
-            ..Default::default()
-        };
+        let mut result = SyncResult::default();
 
         for session in sessions {
             match self.write_one_session(session) {

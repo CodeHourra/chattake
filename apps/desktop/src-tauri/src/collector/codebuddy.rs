@@ -22,7 +22,10 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use walkdir::WalkDir;
 
-use super::normalizer::{file_fingerprint, NormalizedMessage, NormalizedSession};
+use super::normalizer::{
+    file_fingerprint, normalize_user_content, CollectionBatch, CollectionFailure,
+    NormalizedMessage, NormalizedSession,
+};
 
 const SOURCE_ID: &str = "codebuddy";
 
@@ -38,7 +41,7 @@ impl CodeBuddyCollector {
     }
 
     /// 扫描所有配置根目录下的会话目录，产出标准化会话列表
-    pub fn collect_changed<F>(&self, unchanged: F) -> Vec<NormalizedSession>
+    pub fn collect_changed<F>(&self, unchanged: F) -> CollectionBatch
     where
         F: Fn(&Path, i64, i64) -> bool,
     {
@@ -47,7 +50,7 @@ impl CodeBuddyCollector {
             self.scan_dirs.len(),
             self.scan_dirs
         );
-        let mut sessions = Vec::new();
+        let mut batch = CollectionBatch::default();
         let mut seen = HashSet::<String>::new();
 
         for root in &self.scan_dirs {
@@ -72,6 +75,7 @@ impl CodeBuddyCollector {
                     continue;
                 }
                 leaf_candidates += 1;
+                batch.found += 1;
                 let key = path.to_string_lossy().to_string();
                 if !seen.insert(key) {
                     continue;
@@ -82,16 +86,28 @@ impl CodeBuddyCollector {
                     None => continue,
                 };
                 if unchanged(&index_path, mtime, size) {
+                    batch.skipped += 1;
+                    batch
+                        .skipped_paths
+                        .push(index_path.to_string_lossy().into_owned());
                     continue;
                 }
 
                 match parse_codebuddy_session_dir(path) {
                     Ok(Some(s)) => {
-                        sessions.push(s);
+                        batch.sessions.push(s);
                         parsed_ok += 1;
                     }
-                    Ok(None) => {}
-                    Err(e) => log::warn!("解析 CodeBuddy 会话目录失败: {} — {}", path.display(), e),
+                    Ok(None) => {
+                        batch.skipped += 1;
+                        batch
+                            .skipped_paths
+                            .push(index_path.to_string_lossy().into_owned());
+                    }
+                    Err(e) => batch.failures.push(CollectionFailure {
+                        raw_path: path.to_string_lossy().into_owned(),
+                        error: e.to_string(),
+                    }),
                 }
             }
             log::info!(
@@ -102,8 +118,8 @@ impl CodeBuddyCollector {
             );
         }
 
-        log::info!("CodeBuddy 扩展采集完成，共 {} 个会话", sessions.len());
-        sessions
+        log::info!("CodeBuddy 扩展采集完成，共 {} 个会话", batch.sessions.len());
+        batch
     }
 }
 
@@ -370,9 +386,17 @@ fn parse_codebuddy_session_dir(
         if trimmed.is_empty() {
             continue;
         }
+        let content = if role == "user" {
+            match normalize_user_content(trimmed) {
+                Some(content) => content,
+                None => continue,
+            }
+        } else {
+            trimmed.to_string()
+        };
         messages.push(NormalizedMessage {
             role: role.to_string(),
-            content: trimmed.to_string(),
+            content,
             timestamp: ts,
             tokens_in,
             tokens_out,
@@ -517,9 +541,7 @@ fn extract_user_text(outer: &Value, inner: &Value) -> String {
     combined
 }
 
-/// 与 `ChatReplay.vue` / Claude 采集约定一致：`[Tool: name]` 供 Markdown 渲染为行内代码；`<thinking>` 可折叠
-///
-/// 新版为对象数组；旧版可能为单字符字符串数组（与 `inner_content_to_text` 文档一致），无结构化块时拼接为整段正文。
+/// 仅保留助手可见文本；reasoning 与 tool-call 不是对话正文。
 fn extract_assistant_text(inner: &Value) -> String {
     if let Some(s) = inner.get("content").and_then(|c| c.as_str()) {
         return s.to_string();
@@ -533,28 +555,12 @@ fn extract_assistant_text(inner: &Value) -> String {
     if matches!(arr.first(), Some(Value::Object(_))) {
         let mut parts = Vec::new();
         for b in arr {
-            let typ = b["type"].as_str().unwrap_or("");
-            match typ {
-                "text" => {
-                    if let Some(t) = b["text"].as_str() {
-                        if !t.trim().is_empty() {
-                            parts.push(t.to_string());
-                        }
+            if b["type"].as_str() == Some("text") {
+                if let Some(t) = b["text"].as_str() {
+                    if !t.trim().is_empty() {
+                        parts.push(t.to_string());
                     }
                 }
-                "reasoning" => {
-                    if let Some(t) = b["text"].as_str() {
-                        let tt = t.trim();
-                        if !tt.is_empty() {
-                            parts.push(format!("<thinking>{}</thinking>", tt));
-                        }
-                    }
-                }
-                "tool-call" => {
-                    let name = b["toolName"].as_str().unwrap_or("tool");
-                    parts.push(format!("[Tool: {}]", name));
-                }
-                _ => {}
             }
         }
         return parts.join("\n");
@@ -590,6 +596,18 @@ mod tests {
             extract_xml_section(s, "user_query").as_deref(),
             Some("你好")
         );
+    }
+
+    #[test]
+    fn assistant_excludes_reasoning_and_tools() {
+        let inner = json!({
+            "content": [
+                { "type": "reasoning", "text": "secret" },
+                { "type": "tool-call", "toolName": "shell" },
+                { "type": "text", "text": "可见回答" }
+            ]
+        });
+        assert_eq!(extract_assistant_text(&inner), "可见回答");
     }
 
     #[test]

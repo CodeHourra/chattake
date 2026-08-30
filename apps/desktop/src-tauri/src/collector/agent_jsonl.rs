@@ -8,7 +8,10 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use walkdir::WalkDir;
 
-use super::normalizer::{file_fingerprint, NormalizedMessage, NormalizedSession};
+use super::normalizer::{
+    file_fingerprint, normalize_user_content, CollectionBatch, CollectionFailure,
+    NormalizedMessage, NormalizedSession,
+};
 
 pub struct AgentJsonlCollector {
     source_id: &'static str,
@@ -17,14 +20,17 @@ pub struct AgentJsonlCollector {
 
 impl AgentJsonlCollector {
     pub fn new(source_id: &'static str, scan_dirs: Vec<PathBuf>) -> Self {
-        Self { source_id, scan_dirs }
+        Self {
+            source_id,
+            scan_dirs,
+        }
     }
 
-    pub fn collect_changed<F>(&self, unchanged: F) -> Vec<NormalizedSession>
+    pub fn collect_changed<F>(&self, unchanged: F) -> CollectionBatch
     where
         F: Fn(&Path, i64, i64) -> bool,
     {
-        let mut sessions = Vec::new();
+        let mut batch = CollectionBatch::default();
         for root in &self.scan_dirs {
             if !root.is_dir() {
                 continue;
@@ -38,25 +44,33 @@ impl AgentJsonlCollector {
                 if !path.is_file() || path.extension().and_then(|v| v.to_str()) != Some("jsonl") {
                     continue;
                 }
+                batch.found += 1;
                 let Some((mtime, size)) = file_fingerprint(path) else {
                     continue;
                 };
                 if unchanged(path, mtime, size) {
+                    batch.skipped += 1;
+                    batch
+                        .skipped_paths
+                        .push(path.to_string_lossy().into_owned());
                     continue;
                 }
                 match parse_agent_jsonl(path, self.source_id, mtime, size) {
-                    Ok(Some(session)) => sessions.push(session),
-                    Ok(None) => {}
-                    Err(error) => log::warn!(
-                        "解析 {} 会话失败: {} — {}",
-                        self.source_id,
-                        path.display(),
-                        error
-                    ),
+                    Ok(Some(session)) => batch.sessions.push(session),
+                    Ok(None) => {
+                        batch.skipped += 1;
+                        batch
+                            .skipped_paths
+                            .push(path.to_string_lossy().into_owned());
+                    }
+                    Err(error) => batch.failures.push(CollectionFailure {
+                        raw_path: path.to_string_lossy().into_owned(),
+                        error: error.to_string(),
+                    }),
                 }
             }
         }
-        sessions
+        batch
     }
 }
 
@@ -73,20 +87,40 @@ fn parse_agent_jsonl(
     let mut created_at = None;
     let mut updated_at = None;
 
-    for line in BufReader::new(File::open(path)?).lines() {
+    let mut lines = BufReader::new(File::open(path)?).lines().peekable();
+    while let Some(line) = lines.next() {
         let value: Value = match serde_json::from_str(&line?) {
             Ok(value) => value,
-            Err(_) => continue,
+            Err(error) if lines.peek().is_none() => {
+                log::debug!("忽略活跃 {source_id} 会话末尾未完成行: {error}");
+                continue;
+            }
+            Err(error) => return Err(format!("JSONL 中间行损坏: {error}").into()),
         };
-        let timestamp = value.get("timestamp").and_then(Value::as_str).map(str::to_owned);
+        let timestamp = value
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         match value.get("type").and_then(Value::as_str) {
             Some("session") => {
-                session_id = value.get("id").and_then(Value::as_str).map(str::to_owned).or(session_id);
-                cwd = value.get("cwd").and_then(Value::as_str).map(str::to_owned).or(cwd);
+                session_id = value
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .or(session_id);
+                cwd = value
+                    .get("cwd")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .or(cwd);
                 created_at = timestamp.clone().or(created_at);
             }
             Some("title") | Some("title_change") => {
-                title = value.get("title").and_then(Value::as_str).map(str::to_owned).or(title);
+                title = value
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+                    .or(title);
             }
             Some("message") => {
                 let message = &value["message"];
@@ -99,6 +133,14 @@ fn parse_agent_jsonl(
                 if content.is_empty() {
                     continue;
                 }
+                let content = if role == "user" {
+                    match normalize_user_content(&content) {
+                        Some(content) => content,
+                        None => continue,
+                    }
+                } else {
+                    content
+                };
                 let timestamp = message
                     .get("timestamp")
                     .and_then(Value::as_str)
@@ -182,10 +224,33 @@ mod tests {
         ].into_iter().map(|line| line.to_string()).collect::<Vec<_>>().join("\n");
         fs::write(&path, fixture).unwrap();
         let (mtime, size) = file_fingerprint(&path).unwrap();
-        let session = parse_agent_jsonl(&path, "pi", mtime, size).unwrap().unwrap();
+        let session = parse_agent_jsonl(&path, "pi", mtime, size)
+            .unwrap()
+            .unwrap();
         assert_eq!(session.source_id, "pi");
         assert_eq!(session.analysis_title.as_deref(), Some("修复构建"));
         assert_eq!(session.messages.len(), 2);
         assert_eq!(session.messages[1].content, "因为配置错误。");
+    }
+
+    #[test]
+    fn rejects_broken_middle_line_but_tolerates_incomplete_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.jsonl");
+        let session = serde_json::json!({"type":"session","id":"session-1"}).to_string();
+        let message =
+            serde_json::json!({"type":"message","message":{"role":"user","content":"问题"}})
+                .to_string();
+
+        fs::write(&path, format!("{session}\n{{broken\n{message}")).unwrap();
+        let (mtime, size) = file_fingerprint(&path).unwrap();
+        assert!(parse_agent_jsonl(&path, "pi", mtime, size).is_err());
+
+        fs::write(&path, format!("{session}\n{message}\n{{broken")).unwrap();
+        let (mtime, size) = file_fingerprint(&path).unwrap();
+        let parsed = parse_agent_jsonl(&path, "pi", mtime, size)
+            .unwrap()
+            .unwrap();
+        assert_eq!(parsed.messages.len(), 1);
     }
 }

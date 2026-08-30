@@ -9,7 +9,10 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use walkdir::WalkDir;
 
-use super::normalizer::{file_fingerprint, NormalizedMessage, NormalizedSession};
+use super::normalizer::{
+    file_fingerprint, normalize_user_content, CollectionBatch, CollectionFailure,
+    NormalizedMessage, NormalizedSession,
+};
 
 pub struct CodexCollector {
     scan_dirs: Vec<PathBuf>,
@@ -20,7 +23,7 @@ impl CodexCollector {
         Self { scan_dirs }
     }
 
-    pub fn collect_changed<F>(&self, unchanged: F) -> Vec<NormalizedSession>
+    pub fn collect_changed<F>(&self, unchanged: F) -> CollectionBatch
     where
         F: Fn(&Path, i64, i64) -> bool,
     {
@@ -53,18 +56,33 @@ impl CodexCollector {
             }
         }
 
-        let mut sessions = Vec::new();
+        let mut batch = CollectionBatch {
+            found: candidates.len() as u32,
+            ..Default::default()
+        };
         for (_, (path, mtime, size)) in candidates {
             if unchanged(&path, mtime, size) {
+                batch.skipped += 1;
+                batch
+                    .skipped_paths
+                    .push(path.to_string_lossy().into_owned());
                 continue;
             }
             match parse_codex_jsonl(&path, mtime, size) {
-                Ok(Some(session)) => sessions.push(session),
-                Ok(None) => {}
-                Err(error) => log::warn!("解析 Codex 会话失败: {} — {}", path.display(), error),
+                Ok(Some(session)) => batch.sessions.push(session),
+                Ok(None) => {
+                    batch.skipped += 1;
+                    batch
+                        .skipped_paths
+                        .push(path.to_string_lossy().into_owned());
+                }
+                Err(error) => batch.failures.push(CollectionFailure {
+                    raw_path: path.to_string_lossy().into_owned(),
+                    error: error.to_string(),
+                }),
             }
         }
-        sessions
+        batch
     }
 }
 
@@ -87,14 +105,19 @@ fn parse_codex_jsonl(
     let mut first_timestamp = None;
     let mut last_timestamp = None;
 
-    for line in BufReader::new(File::open(path)?).lines() {
+    let mut lines = BufReader::new(File::open(path)?).lines().peekable();
+    while let Some(line) = lines.next() {
         let line = line?;
         if line.trim().is_empty() {
             continue;
         }
         let value: Value = match serde_json::from_str(&line) {
             Ok(value) => value,
-            Err(_) => continue,
+            Err(error) if lines.peek().is_none() => {
+                log::debug!("忽略活跃 Codex 会话末尾未完成行: {error}");
+                continue;
+            }
+            Err(error) => return Err(format!("JSONL 中间行损坏: {error}").into()),
         };
         let timestamp = value
             .get("timestamp")
@@ -149,13 +172,21 @@ fn parse_codex_jsonl(
                 if content.trim().is_empty() {
                     continue;
                 }
+                let content = if role == "user" {
+                    match normalize_user_content(&content) {
+                        Some(content) => content,
+                        None => continue,
+                    }
+                } else {
+                    content.trim().to_string()
+                };
                 first_timestamp.get_or_insert_with(|| timestamp.clone().unwrap_or_default());
                 if timestamp.is_some() {
                     last_timestamp = timestamp.clone();
                 }
                 messages.push(NormalizedMessage {
                     role: role.to_string(),
-                    content: content.trim().to_string(),
+                    content,
                     timestamp,
                     tokens_in: 0,
                     tokens_out: 0,
@@ -214,6 +245,9 @@ mod tests {
             serde_json::json!({"type":"response_item","timestamp":"2026-08-30T00:00:01Z","payload":{"type":"message","role":"developer","content":[{"type":"input_text","text":"secret"}]}}),
             serde_json::json!({"type":"response_item","payload":{"type":"reasoning","summary":[]}}),
             serde_json::json!({"type":"event_msg","payload":{"type":"user_message","message":"duplicate"}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"# AGENTS.md instructions\n<INSTRUCTIONS>secret</INSTRUCTIONS>"}]}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context><cwd>/private</cwd></environment_context>"}]}}),
+            serde_json::json!({"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"The following is the Codex agent history whose request action you are assessing:\nprivate tool history"}]}}),
             serde_json::json!({"type":"response_item","timestamp":"2026-08-30T00:00:02Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"问题"},{"type":"image_url","url":"x"}]}}),
             serde_json::json!({"type":"response_item","timestamp":"2026-08-30T00:00:03Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"回答"}]}}),
             serde_json::json!({"type":"response_item","payload":{"type":"function_call","name":"tool"}}),
@@ -260,8 +294,8 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(2));
         write_fixture(&active.join(&name), "新回答");
 
-        let sessions = CodexCollector::new(vec![active, archived]).collect_changed(|_, _, _| false);
-        assert_eq!(sessions.len(), 1);
-        assert_eq!(sessions[0].messages[0].content, "新回答");
+        let batch = CodexCollector::new(vec![active, archived]).collect_changed(|_, _, _| false);
+        assert_eq!(batch.sessions.len(), 1);
+        assert_eq!(batch.sessions[0].messages[0].content, "新回答");
     }
 }
