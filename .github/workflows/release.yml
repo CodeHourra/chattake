@@ -81,8 +81,10 @@ jobs:
         include:
           - platform: macos-latest
             args: --target aarch64-apple-darwin
+            bun_target: bun-darwin-arm64
           - platform: macos-latest
             args: --target x86_64-apple-darwin
+            bun_target: bun-darwin-x64
     runs-on: ${{ matrix.platform }}
     timeout-minutes: 45
     permissions:
@@ -106,11 +108,22 @@ jobs:
         shell: bash
         env:
           KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           if [ -z "$KEY" ]; then
             echo '::error::未配置 TAURI_SIGNING_PRIVATE_KEY。请阅读 docs/桌面应用-Release与自动更新.md。'
             exit 1
           fi
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::未配置 ${name}，拒绝发布未经 Apple 签名与公证的安装包。"
+              exit 1
+            fi
+          done
 
       - name: Install Rust targets
         uses: dtolnay/rust-toolchain@stable
@@ -123,6 +136,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          CHATTAKE_BUN_TARGET: ${{ matrix.bun_target }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           projectPath: apps/desktop
           tauriScript: bun run tauri

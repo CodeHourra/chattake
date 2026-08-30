@@ -4,7 +4,7 @@
   "scripts": {
     "sync:changelog": "node scripts/sync-changelog.mjs",
     "check:release-version": "node scripts/check-release-version.mjs",
-    "build:companions": "bun run --cwd packages/sidecar build && bun run --cwd packages/mcp-server build",
+    "build:companions": "bun scripts/build-companions.mjs",
     "verify": "bun --cwd packages/sidecar test && bun --cwd packages/mcp-server test && cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml && bun run --cwd apps/desktop build",
     "build:debug": "bun run build:companions && cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml && bun run --cwd apps/desktop tauri -- build --debug --no-bundle"
   },

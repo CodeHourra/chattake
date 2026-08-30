@@ -14,9 +14,9 @@
 
 工作流当前只发布 macOS 双架构；Windows 资源配置仍可用于本地构建，但尚未进入自动发布矩阵。
 
-## 签名密钥（必填）
+## 更新与 Apple 签名（均必填）
 
-Tauri 2 的更新通道**必须**使用 minisign 密钥对；**与 Apple / Windows 代码签名证书无关**（平台证书可后续再接入 CI）。
+Tauri 2 的更新通道必须使用 minisign 密钥对；公开分发的 macOS DMG 还必须使用 Developer ID 签名并完成 Apple 公证。Release 工作流缺少任一密钥都会在构建前停止，避免公开未签名安装包。
 
 > **注意**：仓库内 `tauri.conf.json` 的 `plugins.updater.pubkey` 必须与 GitHub Secret `TAURI_SIGNING_PRIVATE_KEY` 中的私钥成对。若你尚未在 Actions 中配置私钥，请按下方步骤生成新密钥对，并用 **公钥全文** 替换配置里的 `pubkey` 字段（勿提交私钥文件）。
 
@@ -47,18 +47,34 @@ env -u CI bun x tauri signer generate --ci -p '' -w chattake.updater.key -f
 
 未配置 `TAURI_SIGNING_PRIVATE_KEY` 时，Release 工作流会在构建前失败并提示。
 
-### 4. 密钥轮换
+### 4. 配置 Apple 签名与公证
+
+按 [Tauri macOS 签名文档](https://v2.tauri.app/zh-cn/distribute/sign/macos/) 导出 Developer ID Application 证书，并在 Actions Secrets 增加：
+
+| Name | 说明 |
+|------|------|
+| `APPLE_CERTIFICATE` | `.p12` 证书的 Base64 内容 |
+| `APPLE_CERTIFICATE_PASSWORD` | 导出 `.p12` 时设置的密码 |
+| `APPLE_ID` | Apple 开发者账号邮箱 |
+| `APPLE_PASSWORD` | 账号的 app-specific password |
+| `APPLE_TEAM_ID` | Apple Developer Team ID |
+
+Tauri 可从 `APPLE_CERTIFICATE` 推断签名身份，无需再维护一份 identity 配置。
+
+### 5. 密钥轮换
 
 若私钥泄露或遗失：重新生成密钥对 → 更新 `pubkey` → 更新 Secret → **发一版新安装包**；已安装旧公钥的用户需能先收到一次带新公钥的更新（或需手动重装，视情况而定）。
 
 ## 本地验证构建
 
 ```bash
-cd apps/desktop
+export CHATTAKE_BUN_TARGET=bun-darwin-arm64 # Intel 改为 bun-darwin-x64
 export TAURI_SIGNING_PRIVATE_KEY="$(cat chattake.updater.key)"
 # 若有密码：export TAURI_SIGNING_PRIVATE_KEY_PASSWORD='...'
-env -u CI bun run tauri build
+bun run --cwd apps/desktop tauri -- build --target aarch64-apple-darwin
 ```
+
+`CHATTAKE_BUN_TARGET` 必须与 Rust `--target` 一致，否则主程序与 Sidecar/MCP 会出现架构不匹配。
 
 ## 常见问题
 

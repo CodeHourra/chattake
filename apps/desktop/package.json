@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
-    "build:tauri": "cd ../.. && bun run sync:changelog && bun run --cwd packages/sidecar build && bun run --cwd packages/mcp-server build && bun run --cwd apps/desktop build",
+    "build:tauri": "cd ../.. && bun run sync:changelog && bun run build:companions && bun run --cwd apps/desktop build",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:build": "env -u CI tauri build"
