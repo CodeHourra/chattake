@@ -21,7 +21,7 @@ const message = useMessage()
 const dialog = useDialog()
 
 const queue = useAnalysisQueueStore()
-const { currentTask, tasks } = storeToRefs(queue)
+const { tasks } = storeToRefs(queue)
 
 const session = ref<Session | null>(null)
 const messages = ref<Message[]>([])
@@ -42,10 +42,11 @@ const typeOptions = [
   { label: '片段', value: 'snippet' },
 ]
 
-/** 当前会话是否正在执行 distill（队列头） */
-const analyzing = computed(
-  () => currentTask.value?.sessionId === props.sessionId,
+/** 当前会话是否正在执行 distill。 */
+const activeTask = computed(() =>
+  tasks.value.find((task) => task.sessionId === props.sessionId && task.status === 'running') ?? null,
 )
+const analyzing = computed(() => activeTask.value != null)
 
 /** 已在队列中但尚未轮到 */
 const analyzeQueued = computed(() =>
@@ -54,12 +55,12 @@ const analyzeQueued = computed(() =>
 
 /** 耗时超过 150s 提示「分析较慢」 */
 const analyzeSlow = computed(
-  () => analyzing.value && (currentTask.value?.elapsedSec ?? 0) > 150,
+  () => analyzing.value && (activeTask.value?.elapsedSec ?? 0) > 150,
 )
 
 // ────────────── 数据加载 ──────────────
 
-async function load() {
+async function load(preferLatest = false) {
   loading.value = true
   loadError.value = null
   try {
@@ -71,10 +72,14 @@ async function load() {
     messages.value = page.items
     nextCursor.value = page.nextCursor
 
-    const cardId = typeof route.query.cardId === 'string' ? route.query.cardId : null
+    const routeCardId = typeof route.query.cardId === 'string' ? route.query.cardId : null
+    const cardId = preferLatest ? sess.cardId : routeCardId ?? sess.cardId
     if (cardId) {
       card.value = await api.getCard(cardId)
       mode.value = 'note'
+      if (preferLatest && cardId !== routeCardId) {
+        void router.replace({ query: { ...route.query, cardId } })
+      }
     } else {
       card.value = null
     }
@@ -96,9 +101,18 @@ async function loadMoreMessages() {
 }
 
 onMounted(load)
-watch(() => [props.sessionId, route.query.cardId], () => {
+watch(() => [props.sessionId, route.query.cardId], ([sessionId, cardId], previous) => {
+  if (sessionId === previous?.[0] && typeof cardId === 'string' && card.value?.id === cardId) return
   void load()
 })
+watch(
+  () => tasks.value.find((task) => task.sessionId === props.sessionId)?.status,
+  (status, previous) => {
+    if ((previous === 'pending' || previous === 'running') && (status === 'done' || status === 'error')) {
+      void load(true)
+    }
+  },
+)
 
 // ────────────── 操作 ──────────────
 
@@ -125,13 +139,12 @@ async function onExportMarkdown() {
 
 async function analyze() {
   analyzeError.value = null
-  if (session.value) session.value.status = 'analyzing'
   try {
     await queue.startAnalysis([props.sessionId])
-    analyzeError.value = '分析任务已创建；完成后可从对话列表打开生成的知识项。'
+    if (session.value) session.value.status = 'analyzing'
+    message.success('分析任务已创建，可在顶部「进度中心」查看进度')
   } catch (error) {
     analyzeError.value = appendDistillHint(error instanceof Error ? error.message : String(error))
-    if (session.value) session.value.status = 'error'
   }
 }
 
@@ -324,7 +337,7 @@ const valueColors: Record<string, string> = {
         <n-result v-else-if="loadError" status="error" :title="loadError" class="py-12">
           <template #footer>
             <n-button @click="close">返回列表</n-button>
-            <n-button class="ml-2" @click="load">重试</n-button>
+            <n-button class="ml-2" @click="load()">重试</n-button>
           </template>
         </n-result>
 
@@ -350,7 +363,7 @@ const valueColors: Record<string, string> = {
           >
             <span class="i-lucide-clock w-4 h-4 text-neutral-500 shrink-0" />
             <p class="text-sm text-neutral-600 dark:text-neutral-300">
-              已加入分析队列，等待前面的任务完成…（见右下角面板）
+              已加入分析队列，等待执行；可在顶部「进度中心」查看进度。
             </p>
           </div>
 
@@ -369,11 +382,13 @@ const valueColors: Record<string, string> = {
 
           <div
             v-if="analyzeError"
+            role="alert"
+            aria-live="assertive"
             class="mb-4 flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 px-3 py-2 text-sm text-red-600 dark:text-red-400"
           >
             <span class="i-lucide-alert-circle w-4 h-4 shrink-0" />
             <span class="flex-1">{{ analyzeError }}</span>
-            <button class="opacity-60 hover:opacity-100" type="button" @click="analyzeError = null">✕</button>
+            <button class="opacity-60 hover:opacity-100" type="button" aria-label="关闭错误提示" @click="analyzeError = null">✕</button>
           </div>
 
           <NoteCard
@@ -417,17 +432,19 @@ const valueColors: Record<string, string> = {
           >
             <span class="i-lucide-clock w-4 h-4 text-neutral-500 shrink-0" />
             <p class="text-sm text-neutral-600 dark:text-neutral-300">
-              已加入分析队列，等待前面的任务完成…（见右下角面板）
+              已加入分析队列，等待执行；可在顶部「进度中心」查看进度。
             </p>
           </div>
 
           <div
             v-if="analyzeError"
+            role="alert"
+            aria-live="assertive"
             class="mb-4 flex items-center gap-2 rounded-lg border border-red-200 dark:border-red-900/50 bg-red-50 dark:bg-red-950/30 px-3 py-2 text-sm text-red-600 dark:text-red-400"
           >
             <span class="i-lucide-alert-circle w-4 h-4 shrink-0" />
             <span class="flex-1">{{ analyzeError }}</span>
-            <button class="opacity-60 hover:opacity-100" type="button" @click="analyzeError = null">✕</button>
+            <button class="opacity-60 hover:opacity-100" type="button" aria-label="关闭错误提示" @click="analyzeError = null">✕</button>
           </div>
 
           <div

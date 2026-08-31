@@ -246,7 +246,9 @@ impl Database {
         conn.query_row(
             "SELECT id, source_id, external_session_id, source_host, project_path, project_name,
                     message_count, content_hash, raw_path, created_at, updated_at,
-                    status, value, has_updates, analyzed_at, error_message, analysis_title
+                    status, value, has_updates, analyzed_at, error_message, analysis_title,
+                    (SELECT c.id FROM cards c WHERE c.session_id = sessions.id
+                     ORDER BY c.created_at DESC, c.id DESC LIMIT 1)
              FROM sessions WHERE id = ?1",
             params![id],
             |row| {
@@ -268,6 +270,7 @@ impl Database {
                     analyzed_at: row.get(14)?,
                     error_message: row.get(15)?,
                     analysis_title: row.get(16)?,
+                    card_id: row.get(17)?,
                 })
             },
         )

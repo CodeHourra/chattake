@@ -685,6 +685,10 @@ mod tests {
                 tech_stack: &technologies,
             })
             .unwrap();
+        assert_eq!(
+            db.get_session(&session_id).unwrap().card_id,
+            Some(high_id.clone())
+        );
         let draft_id = db
             .insert_card(&NewCard {
                 session_id: &session_id,
