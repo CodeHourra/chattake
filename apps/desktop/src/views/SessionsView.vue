@@ -99,7 +99,7 @@ const batchExpected = computed(() => activeAnalysisJob.value?.total ?? 0)
 async function onAnalyze(sessionId: string) {
   try {
     await queue.startAnalysis([sessionId])
-    showToast('分析任务已创建，可在任务中心查看阶段和进度')
+    showToast('分析任务已创建，可在进度中心查看阶段和进度')
   } catch (error) {
     showToast(error instanceof Error ? error.message : String(error), 'error')
   }

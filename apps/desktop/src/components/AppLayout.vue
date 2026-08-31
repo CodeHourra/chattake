@@ -3,7 +3,6 @@ import { onMounted } from 'vue'
 import { useMessage } from 'naive-ui'
 import TopBar from './TopBar.vue'
 import Sidebar from './Sidebar.vue'
-import AnalysisQueuePanel from './AnalysisQueuePanel.vue'
 import { api } from '../lib/tauri'
 import { useAnalysisQueueStore } from '../stores/analysisQueue'
 
@@ -26,6 +25,5 @@ onMounted(async () => {
         <router-view />
       </main>
     </div>
-    <AnalysisQueuePanel />
   </div>
 </template>

@@ -72,5 +72,5 @@
 
 - **Store**：`stores/analysisQueue.ts` — `enqueue` / `cancel` / `clear`，内部**串行**调用 `distill_session`（与 Sidecar 单通道一致）。
 - **入口统一**：会话列表单条「分析」、批量「开始分析」、详情页「提炼笔记 / 重新分析」均通过 `enqueue` 入队。
-- **UI**：`components/AnalysisQueuePanel.vue` 挂在 `AppLayout`，任意页面可见进度、耗时、「停止排队」（未执行任务取消并恢复为 `pending`）；标题栏可**收起**为右下角圆角窄条（显示进度与当前标题摘要），点击窄条可重新展开。
+- **UI**：`components/AnalysisQueuePanel.vue` 由顶栏「进度中心」入口打开，任意页面可在弹窗中查看进度、耗时与失败明细，并取消或重试任务；不再使用会遮挡正文或分页的右下角悬浮层。
 - **批量完成 Toast**：`SessionsView` 对批量入队的任务在 callbacks 中计数，全部结束后提示成功/失败条数。

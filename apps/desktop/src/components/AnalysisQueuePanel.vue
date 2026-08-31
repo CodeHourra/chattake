@@ -1,19 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
-import { NButton, NDropdown, NProgress, NSpin, NTag } from 'naive-ui'
+import { NButton, NDropdown, NEmpty, NModal, NProgress, NSpin, NTag } from 'naive-ui'
 import { useAnalysisQueueStore } from '../stores/analysisQueue'
 import { api } from '../lib/tauri'
 import type { Job, JobItem } from '../types'
 
 const queue = useAnalysisQueueStore()
-const { jobs, clock, hasAny, isIdle } = storeToRefs(queue)
-const collapsed = ref(false)
+const { jobs, clock, isIdle } = storeToRefs(queue)
+const show = defineModel<boolean>('show', { default: false })
 const providerOptions = ref<Array<{ label: string; key: string }>>([])
-const activeJob = computed(() => jobs.value.find((job) => job.status === 'running' || job.status === 'queued') ?? jobs.value[0])
-
-watch(hasAny, (value) => { if (!value) collapsed.value = false })
-watch(isIdle, (value) => { if (value && hasAny.value) collapsed.value = true }, { immediate: true })
 
 const statusLabel: Record<string, string> = {
   queued: '排队中', running: '执行中', succeeded: '已完成', failed: '失败',
@@ -41,6 +37,10 @@ function currentItemTitle(job: Job) {
   const item = job.items.find((candidate) => candidate.status === 'running')
   return item ? itemTitle(item) : null
 }
+function clearAndClose() {
+  queue.clear()
+  show.value = false
+}
 
 onMounted(async () => {
   const config = await api.getConfig().catch(() => null)
@@ -52,33 +52,18 @@ onMounted(async () => {
 </script>
 
 <template>
-  <Transition name="task-center">
-    <button
-      v-if="hasAny && collapsed"
-      type="button"
-      class="task-pill"
-      aria-label="展开任务中心"
-      @click="collapsed = false"
-    >
-      <span v-if="activeJob?.status === 'running'" class="i-lucide-loader-2 w-4 h-4 animate-spin" />
-      <span v-else class="i-lucide-activity w-4 h-4" />
-      <span>{{ activeJob?.kind === 'sync' ? '同步' : '分析' }}</span>
-      <span class="tabular-nums">{{ activeJob?.done ?? 0 }}/{{ activeJob?.total ?? 0 }}</span>
-      <span class="i-lucide-chevron-up w-4 h-4" />
-    </button>
-  </Transition>
-
-  <Transition name="task-center">
-    <section v-if="hasAny && !collapsed" class="task-center" aria-live="polite" aria-label="任务中心">
+  <n-modal v-model:show="show">
+    <section class="task-center" aria-live="polite" aria-label="进度中心">
       <header class="task-header">
-        <div class="flex items-center gap-2"><span class="i-lucide-activity w-4 h-4" /><strong>任务中心</strong></div>
+        <div class="flex items-center gap-2"><span class="i-lucide-activity w-4 h-4" /><strong>进度中心</strong></div>
         <div class="flex items-center gap-1">
-          <n-button quaternary size="tiny" aria-label="收起任务中心" @click="collapsed = true"><span class="i-lucide-chevron-down w-4 h-4" /></n-button>
-          <n-button v-if="isIdle" quaternary size="tiny" aria-label="关闭任务中心" @click="queue.clear()"><span class="i-lucide-x w-4 h-4" /></n-button>
+          <n-button v-if="isIdle" quaternary size="tiny" aria-label="清除已完成任务" @click="clearAndClose"><span class="i-lucide-trash-2 w-4 h-4" /></n-button>
+          <n-button quaternary size="tiny" aria-label="关闭进度中心" @click="show = false"><span class="i-lucide-x w-4 h-4" /></n-button>
         </div>
       </header>
 
       <div class="task-list">
+        <n-empty v-if="!jobs.length" description="暂无任务" class="task-empty" />
         <article v-for="job in jobs" :key="job.id" class="job-card">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
@@ -125,14 +110,15 @@ onMounted(async () => {
         </article>
       </div>
     </section>
-  </Transition>
+  </n-modal>
 </template>
 
 <style scoped>
-.task-center { position: fixed; right: 20px; bottom: 20px; z-index: 60; width: min(360px, calc(100vw - 32px)); max-height: min(520px, calc(100vh - 100px)); overflow: hidden; border: 1px solid var(--line); border-radius: var(--panel-radius); background: var(--surface-glass); box-shadow: 0 18px 46px rgba(20, 24, 22, .13); backdrop-filter: blur(20px) saturate(1.06); }
-.dark .task-center { --task-bg: #171917; border-color: rgba(255,255,255,.1); }
+.task-center { width:min(560px,calc(100vw - 32px)); max-height:calc(100vh - 96px); overflow:hidden; border:1px solid var(--line); border-radius:var(--panel-radius); background:var(--surface); box-shadow:0 18px 46px rgba(20,24,22,.13); }
+.dark .task-center { border-color:rgba(255,255,255,.1); }
 .task-header { display: flex; align-items: center; justify-content: space-between; padding: 11px 13px; border-bottom: 1px solid rgba(122,125,117,.16); }
-.task-list { max-height: 442px; overflow-y: auto; padding: 0 13px 8px; }
+.task-list { max-height:calc(100vh - 160px); overflow-y:auto; padding:0 13px 8px; }
+.task-empty { padding:48px 0; }
 .job-card { padding: 13px 0; border-bottom: 1px solid color-mix(in srgb,var(--line) 72%,transparent); background: transparent; }
 .job-card:last-child { border-bottom:0; }
 .job-meta { margin-top: 4px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
@@ -141,7 +127,4 @@ onMounted(async () => {
 .item-row { display: flex; align-items: flex-start; gap: 7px; padding: 7px 0; font-size: 11px; border-top: 1px solid rgba(122,125,117,.12); }
 .item-error { margin-top: 2px; color: var(--vermilion); overflow-wrap: anywhere; }
 .item-phase { margin-top: 2px; color: var(--muted); }
-.task-pill { position: fixed; right: 20px; bottom: 20px; z-index: 60; display: flex; min-height:36px; align-items: center; gap: 8px; padding: 0 12px; border: 1px solid var(--line); border-radius: var(--control-radius); background: color-mix(in srgb, var(--task-bg, #f7f5ef) 90%, transparent); color: inherit; box-shadow: 0 10px 28px rgba(20,24,22,.12); backdrop-filter: blur(18px); font-size: 12px; cursor:pointer; }
-.task-center-enter-active,.task-center-leave-active { transition: opacity .16s ease, transform .16s ease; }
-.task-center-enter-from,.task-center-leave-to { opacity: 0; transform: translateY(8px); }
 </style>

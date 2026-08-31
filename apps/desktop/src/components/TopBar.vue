@@ -13,6 +13,7 @@ import { useUiStore } from '../stores/ui'
 import { useAnalysisQueueStore } from '../stores/analysisQueue'
 import { api } from '../lib/tauri'
 import { exportAllCardsToDir } from '../lib/cardExport'
+import AnalysisQueuePanel from './AnalysisQueuePanel.vue'
 const SettingsModal = defineAsyncComponent(() => import('./SettingsModal.vue'))
 const AppUpdateModal = defineAsyncComponent(() => import('./AppUpdateModal.vue'))
 
@@ -25,6 +26,7 @@ const dialog = useDialog()
 const showSettings = ref(false)
 /** 独立「软件更新」弹窗（与设置解耦） */
 const showAppUpdate = ref(false)
+const showTaskCenter = ref(false)
 const syncing = computed(() => queue.jobs.some((job) => job.kind === 'sync' && ['queued', 'running'].includes(job.status)))
 const activeJob = computed(() => queue.jobs.find((job) => ['queued', 'running'].includes(job.status)))
 
@@ -76,7 +78,7 @@ function onTabChange(tab: 'sessions' | 'library') {
 async function onSync() {
   try {
     await queue.startSync()
-    message.success('同步任务已创建，可在任务中心查看文件级进度')
+    message.success('同步任务已创建，可在进度中心查看文件级进度')
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     message.error(msg, { duration: 12000, closable: true })
@@ -131,11 +133,20 @@ async function onSync() {
 
     <!-- 右侧：同步 + 工具按钮 -->
     <div class="flex items-center gap-2">
-      <div v-if="activeJob" class="top-progress" aria-live="polite">
-        <span>{{ activeJob.kind === 'sync' ? '同步' : '分析' }}</span>
-        <span class="tabular-nums">{{ activeJob.done }}/{{ activeJob.total }}</span>
-        <span class="top-progress-track"><i :style="{ width: `${activeJob.total ? activeJob.done / activeJob.total * 100 : 0}%` }" /></span>
-      </div>
+      <n-button
+        size="small"
+        secondary
+        class="task-center-button"
+        aria-label="打开进度中心"
+        @click="showTaskCenter = true"
+      >
+        <span class="inline-flex items-center gap-1.5">
+          <span :class="activeJob ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-activity'" class="w-3.5 h-3.5" />
+          <span>进度中心</span>
+          <span v-if="activeJob" class="task-center-status tabular-nums">{{ activeJob.done }}/{{ activeJob.total }}</span>
+          <span v-else-if="queue.hasAny" class="task-center-status">已完成</span>
+        </span>
+      </n-button>
       <n-button
         size="small"
         secondary
@@ -198,6 +209,7 @@ async function onSync() {
 
   <app-update-modal v-model:show="showAppUpdate" />
   <settings-modal v-model:show="showSettings" />
+  <analysis-queue-panel v-model:show="showTaskCenter" />
 </template>
 
 <style scoped>
@@ -217,9 +229,8 @@ async function onSync() {
 .top-nav-item.active::after { content:''; position:absolute; right:15px; bottom:-1px; left:15px; height:2px; background:var(--vermilion); }
 .top-nav-icon { width:16px; height:16px; color:currentColor; opacity:.82; }
 .top-nav-item.active .top-nav-icon { color:var(--pine); opacity:1; }
+.task-center-button { min-width:104px; }
+.task-center-status { color:var(--pine); font-size:10px; }
 .sync-button { min-width:70px; }
-.top-progress { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:10px; }
-.top-progress-track { width:48px; height:2px; overflow:hidden; background:var(--line); }
-.top-progress-track i { display:block; height:100%; background:var(--pine); transition:width .16s linear; }
 @media (max-width:1000px) { .product-tagline,.app-version { display:none; } .top-bar-start { gap:12px; } .top-nav-item { min-width:auto; padding:0 12px; } }
 </style>
