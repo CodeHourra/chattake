@@ -139,6 +139,19 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Stabilize updater download URLs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/chattake-updater"
+          gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --pattern latest.json --dir "${RUNNER_TEMP}/chattake-updater"
+          gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json assets > "${RUNNER_TEMP}/chattake-updater/assets.json"
+          node scripts/stabilize-updater-json.mjs "${RUNNER_TEMP}/chattake-updater/latest.json" "${RUNNER_TEMP}/chattake-updater/assets.json"
+          gh release upload "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" "${RUNNER_TEMP}/chattake-updater/latest.json" --clobber
+
       - name: Publish complete Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
