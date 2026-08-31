@@ -39,7 +39,8 @@
       "../../../packages/mcp-server/dist/chattake-mcp": "chattake-mcp"
     },
     "macOS": {
-      "bundleName": "有得"
+      "bundleName": "有得",
+      "signingIdentity": "-"
     }
   },
   "plugins": {

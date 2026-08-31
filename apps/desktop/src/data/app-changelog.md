@@ -27,6 +27,7 @@
 
 ### 修复
 
+- **macOS 发布**：改用 Ad Hoc 签名、未公证分发，生成 DMG 不再依赖 Apple Developer 证书；首次启动由用户在「隐私与安全性」确认
 - 修复会话列表按项目筛选时，多表联查可能触发 SQLite `ambiguous column name: project_name` 的问题。
 
 ## 0.1.7（2026-03-26）

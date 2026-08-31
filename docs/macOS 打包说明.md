@@ -71,7 +71,7 @@ cargo build --release
   当前使用 `com.chattake.desktop`；签名、公证与外部分发应保持该标识稳定。
 
 - **代码签名 / 公证**  
-  本地试用可直接打开；若需分发给他人并减少「无法验证开发者」提示，需在 Apple 开发者账号下配置证书并对 `.app` 签名/notarize，此处不展开。
+  当前使用 Ad Hoc 签名（`signingIdentity: "-"`）且不做 Apple 公证。首次启动被 Gatekeeper 拦截时，先尝试打开一次，再到「系统设置 → 隐私与安全性」点击「仍要打开」。若未来需要消除该提示，再改用 Developer ID 签名与 Apple 公证。
 
 - **提炼报 API 鉴权或模型错误**
   在「设置 → AI 配置」检查当前配置的 Base URL、API Key 和完整模型 ID；有得不会自动切换到其他供应商。
