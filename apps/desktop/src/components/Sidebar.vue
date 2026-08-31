@@ -22,9 +22,14 @@ import type { SessionFilterPayload } from '../types'
 
 // 品牌图标（官方 logo，通过 Vite asset URL 导入）
 import claudeCodeIcon from '../assets/brands/claude-code.png?url'
-import cursorIcon from '../assets/brands/cursor.png?url'
 import codebuddyIcon from '../assets/brands/codebuddy.svg?url'
 import openaiIcon from '../assets/brands/openai.svg?url'
+import cursorLightIcon from '../assets/brands/cursor-light.svg?url'
+import cursorDarkIcon from '../assets/brands/cursor-dark.svg?url'
+import ompLightIcon from '../assets/brands/omp-light.svg?url'
+import ompDarkIcon from '../assets/brands/omp-dark.svg?url'
+import piLightIcon from '../assets/brands/pi-light.svg?url'
+import piDarkIcon from '../assets/brands/pi-dark.svg?url'
 
 const ui = useUiStore()
 const filters = useFiltersStore()
@@ -50,13 +55,13 @@ const checkedKeys = ref<string[]>([])
  * 数据源元信息：每个 source_id 对应其品牌标签和图标
  * imgIcon 优先使用品牌 SVG；fallbackIcon 为 UnoCSS 类名兜底
  */
-const SOURCE_META: Record<string, { label: string; imgIcon?: string; fallbackIcon: string }> = {
+const SOURCE_META: Record<string, { label: string; imgIcon?: string; darkImgIcon?: string; fallbackIcon: string }> = {
   'claude-code': { label: 'Claude Code', imgIcon: claudeCodeIcon, fallbackIcon: 'i-lucide-terminal' },
-  'cursor': { label: 'Cursor', imgIcon: cursorIcon, fallbackIcon: 'i-lucide-mouse-pointer-click' },
+  'cursor': { label: 'Cursor', imgIcon: cursorLightIcon, darkImgIcon: cursorDarkIcon, fallbackIcon: 'i-lucide-mouse-pointer-click' },
   codebuddy: { label: 'CodeBuddy', imgIcon: codebuddyIcon, fallbackIcon: 'i-lucide-code' },
   codex: { label: 'Codex', imgIcon: openaiIcon, fallbackIcon: 'i-lucide-code-2' },
-  omp: { label: 'Oh My Pi', fallbackIcon: 'i-lucide-orbit' },
-  pi: { label: 'Pi', fallbackIcon: 'i-lucide-circle-dot' },
+  omp: { label: 'Oh My Pi', imgIcon: ompLightIcon, darkImgIcon: ompDarkIcon, fallbackIcon: 'i-lucide-orbit' },
+  pi: { label: 'Pi', imgIcon: piLightIcon, darkImgIcon: piDarkIcon, fallbackIcon: 'i-lucide-circle-dot' },
 }
 
 function getSourceMeta(sourceId: string) {
@@ -67,7 +72,12 @@ function getSourceMeta(sourceId: string) {
 function renderSourceIcon(sourceId: string) {
   const meta = getSourceMeta(sourceId)
   if (meta.imgIcon) {
-    return h('img', { src: meta.imgIcon, alt: '', 'aria-hidden': 'true', class: 'brand-icon', width: 16, height: 16 })
+    const lightIcon = h('img', { src: meta.imgIcon, alt: '', 'aria-hidden': 'true', class: 'brand-icon brand-icon-light', width: 16, height: 16 })
+    if (!meta.darkImgIcon) return lightIcon
+    return h('span', { class: 'brand-icon-pair', 'aria-hidden': 'true' }, [
+      lightIcon,
+      h('img', { src: meta.darkImgIcon, alt: '', class: 'brand-icon brand-icon-dark', width: 16, height: 16 }),
+    ])
   }
   return h('span', { class: `${meta.fallbackIcon} w-4 h-4 opacity-70` })
 }
@@ -698,14 +708,17 @@ watch(() => ui.activeTab, (tab) => {
 .sidebar-tree :deep(.n-tree-node-content) {
   overflow: hidden;
 }
-/* 品牌图标：圆角使外观更精致 */
+.brand-icon-pair { display:inline-flex; width:16px; height:16px; }
 .brand-icon {
   width: 16px;
   height: 16px;
-  border-radius: 3px;
   display: inline-block;
   flex-shrink: 0;
+  object-fit: contain;
 }
+.brand-icon-dark { display:none; }
+:global(.dark) .brand-icon-light { display:none; }
+:global(.dark) .brand-icon-dark { display:inline-block; }
 .library-filter-panel { display:flex; flex-direction:column; gap:18px; padding:16px 16px 24px; }
 .filter-summary { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:7px 4px 7px 10px; border-left:2px solid var(--vermilion); color:var(--muted); font-size:11px; }
 .filter-chip-list { display:flex; flex-wrap:wrap; gap:6px; }
