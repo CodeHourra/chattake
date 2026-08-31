@@ -1,6 +1,6 @@
 [package]
 name = "chattake-desktop"
-version = "0.2.0"
+version = "0.2.1"
 description = "有得 · AI 对话知识库"
 authors = ["ChatTake"]
 edition = "2021"

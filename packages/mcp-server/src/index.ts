@@ -9,7 +9,7 @@ const failure = (error: unknown) => ({ isError: true, content: [{ type: 'text' a
 function createServer() {
   const store = new ChatTakeStore()
   const server = new McpServer(
-    { name: 'chattake', version: '0.2.0' },
+    { name: 'chattake', version: '0.2.1' },
     { instructions: '只读检索有得中已发布的知识。草稿、任务和供应商配置不可访问。' },
   )
   const readOnly = { readOnlyHint: true }
