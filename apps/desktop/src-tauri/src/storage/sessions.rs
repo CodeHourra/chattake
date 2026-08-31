@@ -23,25 +23,25 @@ fn session_filters_where_clause(
     let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
     if let Some(ref source) = filters.source {
-        conditions.push("source_id = ?");
+        conditions.push("s.source_id = ?");
         param_values.push(Box::new(source.clone()));
     }
     if let Some(ref host) = filters.host {
-        conditions.push("source_host = ?");
+        conditions.push("s.source_host = ?");
         param_values.push(Box::new(host.clone()));
     }
     if let Some(ref project) = filters.project {
         if project == UNLINKED_PROJECT_LABEL {
             // 未关联项目：库内为 NULL，不能与字面量「(未关联项目)」等值匹配
-            conditions.push("project_name IS NULL");
+            conditions.push("s.project_name IS NULL");
         } else {
-            conditions.push("(project_name = ? OR project_path = ?)");
+            conditions.push("(s.project_name = ? OR s.project_path = ?)");
             param_values.push(Box::new(project.clone()));
             param_values.push(Box::new(project.clone()));
         }
     }
     if let Some(ref status) = filters.status {
-        conditions.push("status = ?");
+        conditions.push("s.status = ?");
         param_values.push(Box::new(status.clone()));
     }
 
@@ -350,7 +350,7 @@ impl Database {
         let conn = self.read_conn()?;
 
         // 先查总数
-        let count_sql = format!("SELECT COUNT(*) FROM sessions{}", where_clause);
+        let count_sql = format!("SELECT COUNT(*) FROM sessions s{}", where_clause);
         let param_refs: Vec<&dyn rusqlite::types::ToSql> =
             param_values.iter().map(|b| b.as_ref()).collect();
         let total: i64 = conn.query_row(&count_sql, param_refs.as_slice(), |row| row.get(0))?;
@@ -395,7 +395,7 @@ impl Database {
         let mut set: HashSet<String> = HashSet::new();
         for g in groups {
             let (where_clause, param_values) = session_filters_where_clause(g);
-            let list_sql = format!("SELECT id FROM sessions{}", where_clause);
+            let list_sql = format!("SELECT s.id FROM sessions s{}", where_clause);
             let conn = self.read_conn()?;
             let param_refs: Vec<&dyn rusqlite::types::ToSql> =
                 param_values.iter().map(|b| b.as_ref()).collect();
@@ -624,6 +624,44 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::Database;
+    use crate::storage::models::SessionFilters;
+
+    #[test]
+    fn list_sessions_qualifies_project_filter_after_card_join() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = Database::open(&dir.path().join("project-filter.db")).expect("open db");
+
+        db.insert_session(
+            "codex",
+            "sess-project",
+            "local",
+            Some("/tmp/demo"),
+            Some("demo"),
+            1,
+            None,
+            "/tmp/demo.jsonl",
+            "2025-01-01T00:00:00Z",
+            "2025-01-01T00:00:00Z",
+            None,
+        )
+        .expect("insert");
+
+        let result = db
+            .list_sessions(
+                &SessionFilters {
+                    source: Some("codex".into()),
+                    host: Some("local".into()),
+                    project: Some("demo".into()),
+                    ..Default::default()
+                },
+                1,
+                20,
+            )
+            .expect("project-filtered list");
+
+        assert_eq!(result.total, 1);
+        assert_eq!(result.items[0].project_name.as_deref(), Some("demo"));
+    }
 
     /// 回归：Claude/Cursor 重同步时采集端 `analysis_title` 为 None，不得抹掉
     /// `update_session_analysis_meta` 已写入的展示标题（见 docs/踩坑 同名文档）。
