@@ -5,6 +5,12 @@
 
 ---
 
+## 0.2.2（2026-08-31）
+
+### 桌面更新
+
+- 使用 `shallowRef` 保存 Tauri Updater 的 `Update` 实例，避免 Vue 深层代理破坏 `Resource` 私有字段品牌检查，恢复 `downloadAndInstall` 调用。
+
 ## 0.2.1（2026-08-31）
 
 ### 分析任务
