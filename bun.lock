@@ -7,7 +7,7 @@
     },
     "apps/desktop": {
       "name": "@chattake/desktop",
-      "version": "0.2.2",
+      "version": "0.2.3",
       "dependencies": {
         "@tauri-apps/api": "^2",
         "@tauri-apps/plugin-dialog": "^2",
@@ -41,7 +41,7 @@
     },
     "packages/mcp-server": {
       "name": "@chattake/mcp-server",
-      "version": "0.2.2",
+      "version": "0.2.3",
       "dependencies": {
         "@modelcontextprotocol/server": "^2.0.0",
         "zod": "^4.5.4",
@@ -49,11 +49,11 @@
     },
     "packages/shared": {
       "name": "@chattake/shared",
-      "version": "0.2.2",
+      "version": "0.2.3",
     },
     "packages/sidecar": {
       "name": "@chattake/sidecar",
-      "version": "0.2.2",
+      "version": "0.2.3",
       "dependencies": {
         "@chattake/shared": "workspace:*",
         "openai": "^4",
