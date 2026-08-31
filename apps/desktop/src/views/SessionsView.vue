@@ -131,7 +131,7 @@ function onSelectionChange(id: string, checked: boolean) {
 }
 
 /**
- * 批量分析：全部入队，由全局队列串行执行；通过 callbacks 统计完成后 Toast
+ * 批量分析：全部入队，由全局并发限制控制执行数量。
  */
 async function startBatchAnalyze() {
   const ids = [...selectedIds.value]
@@ -178,6 +178,8 @@ function openSearchHit(cardId: string, sessionId: string) {
     >
       <div
         v-if="toast"
+        :role="toast.type === 'error' ? 'alert' : 'status'"
+        :aria-live="toast.type === 'error' ? 'assertive' : 'polite'"
         class="fixed top-4 left-1/2 -translate-x-1/2 z-50 rounded-lg border px-3 py-2 shadow-lg flex items-center gap-2 text-sm"
         :class="{
           'border-red-200 bg-red-50 dark:bg-red-950/80 dark:border-red-800 text-red-800 dark:text-red-200': toast.type === 'error',
@@ -287,8 +289,8 @@ function openSearchHit(cardId: string, sessionId: string) {
           </n-button>
         </div>
 
-        <p v-if="batchRunning" class="text-xs text-slate-500 dark:text-slate-400 mb-2">
-          已加入全局分析队列，进度见右下角面板；请勿关闭应用。
+        <p v-if="batchRunning" role="status" aria-live="polite" class="text-xs text-slate-500 dark:text-slate-400 mb-2">
+          已加入全局分析队列，可在顶部「进度中心」查看进度；任务执行期间请保持应用运行。
         </p>
 
         <!-- 会话卡片列表 -->

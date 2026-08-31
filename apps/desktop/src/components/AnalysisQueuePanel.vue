@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { NButton, NDropdown, NEmpty, NModal, NProgress, NSpin, NTag } from 'naive-ui'
 import { useAnalysisQueueStore } from '../stores/analysisQueue'
@@ -7,9 +7,10 @@ import { api } from '../lib/tauri'
 import type { Job, JobItem } from '../types'
 
 const queue = useAnalysisQueueStore()
-const { jobs, clock, isIdle } = storeToRefs(queue)
+const { jobs, clock } = storeToRefs(queue)
 const show = defineModel<boolean>('show', { default: false })
 const providerOptions = ref<Array<{ label: string; key: string }>>([])
+const hasCompleted = computed(() => jobs.value.some((job) => isTerminal(job)))
 
 const statusLabel: Record<string, string> = {
   queued: '排队中', running: '执行中', succeeded: '已完成', failed: '失败',
@@ -25,6 +26,7 @@ const phaseLabel: Record<string, string> = {
 function progress(job: Job) { return job.total ? Math.round(job.done / job.total * 100) : 0 }
 function itemTitle(item: JobItem) { return item.sourceId || item.sessionId || item.rawPath || item.id }
 function canCancel(job: Job) { return job.status === 'queued' || job.status === 'running' }
+function isTerminal(job: Job) { return ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(job.status) }
 function canRetry(item: JobItem) { return ['failed', 'cancelled', 'interrupted'].includes(item.status) }
 function visibleItems(job: Job) { return job.kind === 'sync' ? job.items.slice(-40) : job.items }
 function elapsed(job: Job) {
@@ -33,13 +35,18 @@ function elapsed(job: Job) {
   const seconds = Math.max(0, Math.floor((end - Date.parse(start)) / 1000))
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`
 }
-function currentItemTitle(job: Job) {
-  const item = job.items.find((candidate) => candidate.status === 'running')
-  return item ? itemTitle(item) : null
+function currentItemSummary(job: Job) {
+  const items = job.items.filter((candidate) => candidate.status === 'running')
+  if (!items.length) return null
+  if (items.length === 1) return `当前：${itemTitle(items[0])}`
+  return `正在并行处理 ${items.length} 项：${items.slice(0, 2).map(itemTitle).join('、')}${items.length > 2 ? '…' : ''}`
 }
-function clearAndClose() {
-  queue.clear()
-  show.value = false
+function jobPhase(job: Job) {
+  if (job.kind === 'analysis' && job.status === 'running') {
+    const running = job.items.filter((item) => item.status === 'running').length
+    return running === 0 ? '等待执行' : running === 1 ? '处理中' : '并行处理中'
+  }
+  return phaseLabel[job.phase] ?? job.phase
 }
 
 onMounted(async () => {
@@ -53,11 +60,13 @@ onMounted(async () => {
 
 <template>
   <n-modal v-model:show="show">
-    <section class="task-center" aria-live="polite" aria-label="进度中心">
+    <section class="task-center" role="dialog" aria-modal="true" aria-labelledby="progress-center-title">
       <header class="task-header">
-        <div class="flex items-center gap-2"><span class="i-lucide-activity w-4 h-4" /><strong>进度中心</strong></div>
+        <div class="flex items-center gap-2"><span class="i-lucide-activity w-4 h-4" /><strong id="progress-center-title">进度中心</strong></div>
         <div class="flex items-center gap-1">
-          <n-button v-if="isIdle" quaternary size="tiny" aria-label="清除已完成任务" @click="clearAndClose"><span class="i-lucide-trash-2 w-4 h-4" /></n-button>
+          <n-button v-if="hasCompleted" quaternary size="tiny" @click="queue.clear()">
+            <span class="inline-flex items-center gap-1"><span class="i-lucide-trash-2 w-3.5 h-3.5" />清除已完成</span>
+          </n-button>
           <n-button quaternary size="tiny" aria-label="关闭进度中心" @click="show = false"><span class="i-lucide-x w-4 h-4" /></n-button>
         </div>
       </header>
@@ -74,13 +83,16 @@ onMounted(async () => {
                 <n-tag size="tiny" :type="job.status === 'failed' ? 'error' : job.status === 'succeeded' ? 'success' : 'default'">{{ statusLabel[job.status] }}</n-tag>
               </div>
               <p class="job-meta">
-                {{ phaseLabel[job.phase] ?? job.phase }} · {{ job.done }}/{{ job.total }}
+                {{ jobPhase(job) }} · {{ job.done }}/{{ job.total }}
                 <template v-if="job.provider"> · {{ job.provider }} / {{ job.model }}</template>
                 · {{ elapsed(job) }}
               </p>
-              <p v-if="currentItemTitle(job)" class="job-current">当前：{{ currentItemTitle(job) }}</p>
+              <p v-if="currentItemSummary(job)" class="job-current">{{ currentItemSummary(job) }}</p>
             </div>
-            <n-button v-if="canCancel(job)" size="tiny" secondary type="warning" @click="queue.cancel(job.id)">取消</n-button>
+            <div class="job-actions">
+              <n-button v-if="canCancel(job)" size="tiny" secondary type="warning" @click="queue.cancel(job.id)">取消</n-button>
+              <n-button v-else-if="isTerminal(job)" size="tiny" quaternary @click="queue.clear(job.id)">清除</n-button>
+            </div>
           </div>
 
           <n-progress type="line" :percentage="progress(job)" :height="5" :show-indicator="false" class="mt-2" />
@@ -123,6 +135,7 @@ onMounted(async () => {
 .job-card:last-child { border-bottom:0; }
 .job-meta { margin-top: 4px; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 .job-current { margin-top:3px; overflow:hidden; color:var(--ink-soft); font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
+.job-actions { display:flex; flex-shrink:0; align-items:center; gap:4px; }
 .item-list { margin-top: 9px; max-height: 230px; overflow-y: auto; }
 .item-row { display: flex; align-items: flex-start; gap: 7px; padding: 7px 0; font-size: 11px; border-top: 1px solid rgba(122,125,117,.12); }
 .item-error { margin-top: 2px; color: var(--vermilion); overflow-wrap: anywhere; }

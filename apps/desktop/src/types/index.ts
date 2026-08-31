@@ -102,6 +102,7 @@ export interface Session {
   hasUpdates: boolean
   analyzedAt: string | null
   errorMessage: string | null
+  cardId: string | null
 }
 
 export interface Message {
@@ -240,6 +241,7 @@ export interface AppConfigDto {
 
 export interface DistillerConfigDto {
   activeProfileId: string
+  maxConcurrentAnalyses: number
   profiles: ProviderProfileDto[]
 }
 
