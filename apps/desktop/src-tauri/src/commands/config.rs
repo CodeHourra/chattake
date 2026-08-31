@@ -21,6 +21,7 @@ pub struct AppConfigDto {
 #[serde(rename_all = "camelCase")]
 pub struct DistillerConfigDto {
     pub active_profile_id: String,
+    pub max_concurrent_analyses: usize,
     pub profiles: Vec<ProviderProfileDto>,
 }
 
@@ -64,6 +65,7 @@ impl From<&AppConfig> for AppConfigDto {
         Self {
             distiller: DistillerConfigDto {
                 active_profile_id: c.distiller.active_profile_id.clone(),
+                max_concurrent_analyses: c.distiller.max_concurrent_analyses,
                 profiles: c
                     .distiller
                     .profiles
@@ -128,6 +130,7 @@ impl From<AppConfigDto> for AppConfig {
         Self {
             distiller: DistillerConfig {
                 active_profile_id: dto.distiller.active_profile_id,
+                max_concurrent_analyses: dto.distiller.max_concurrent_analyses,
                 profiles: dto
                     .distiller
                     .profiles
@@ -198,6 +201,9 @@ pub async fn save_config(state: State<'_, AppState>, config: AppConfigDto) -> Re
     new_config
         .save(&AppConfig::default_path())
         .map_err(|e| format!("配置保存失败: {e}"))?;
+    state
+        .analysis_runtime
+        .set_limit(new_config.distiller.max_concurrent_analyses);
     *state
         .config
         .write()

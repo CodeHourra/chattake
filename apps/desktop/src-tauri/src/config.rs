@@ -35,6 +35,8 @@ pub struct SourceConfig {
 pub struct DistillerConfig {
     #[serde(default)]
     pub active_profile_id: String,
+    #[serde(default = "default_max_concurrent_analyses")]
+    pub max_concurrent_analyses: usize,
     #[serde(default)]
     pub profiles: Vec<ProviderProfile>,
     /// 仅用于把 v0.1 的单 API 配置迁移成 profile；落盘时移除。
@@ -56,6 +58,7 @@ impl Default for DistillerConfig {
     fn default() -> Self {
         Self {
             active_profile_id: "default".to_string(),
+            max_concurrent_analyses: default_max_concurrent_analyses(),
             profiles: vec![ProviderProfile {
                 id: "default".to_string(),
                 name: "OpenAI".to_string(),
@@ -111,6 +114,9 @@ fn default_true() -> bool {
 }
 fn default_timeout() -> u64 {
     120
+}
+fn default_max_concurrent_analyses() -> usize {
+    2
 }
 fn default_provider_kind() -> String {
     "api".to_string()
@@ -254,6 +260,7 @@ impl AppConfig {
             self.distiller = if let Some(api) = self.distiller.legacy_api.take() {
                 DistillerConfig {
                     active_profile_id: "migrated-api".to_string(),
+                    max_concurrent_analyses: default_max_concurrent_analyses(),
                     profiles: vec![ProviderProfile {
                         id: "migrated-api".to_string(),
                         name: "已迁移 API".to_string(),
@@ -286,6 +293,11 @@ impl AppConfig {
     }
 
     pub fn validate(&self) -> ConfigResult<()> {
+        if !(1..=8).contains(&self.distiller.max_concurrent_analyses) {
+            return Err(ConfigError::Invalid(
+                "并行分析数必须在 1–8 之间".to_string(),
+            ));
+        }
         if self.distiller.profiles.is_empty() {
             return Err(ConfigError::Invalid(
                 "至少需要一套分析 Provider 配置".to_string(),
@@ -466,6 +478,7 @@ mod tests {
         );
         assert_eq!(config.distiller.profiles.len(), 1);
         assert_eq!(config.distiller.active_profile_id, "default");
+        assert_eq!(config.distiller.max_concurrent_analyses, 2);
         assert!(config.sync.scan_on_startup);
     }
 
@@ -529,6 +542,15 @@ mod tests {
             .distiller
             .profiles
             .push(config.distiller.profiles[0].clone());
+        assert!(config.validate().is_err());
+    }
+
+    #[test]
+    fn rejects_analysis_concurrency_outside_safe_range() {
+        let mut config = AppConfig::default();
+        config.distiller.max_concurrent_analyses = 0;
+        assert!(config.validate().is_err());
+        config.distiller.max_concurrent_analyses = 9;
         assert!(config.validate().is_err());
     }
 

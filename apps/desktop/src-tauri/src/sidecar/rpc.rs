@@ -5,23 +5,24 @@
 //!
 //! 注意：call() 是同步阻塞的，Tauri command 层需用 spawn_blocking 包装。
 
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{ChildStdin, ChildStdout};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{mpsc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
 
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 /// 默认 RPC 调用超时（秒），LLM 提炼可能需要较长时间
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
+type PendingResponses = Arc<Mutex<HashMap<u64, mpsc::Sender<Result<String, String>>>>>;
 
 /// JSON-RPC 2.0 客户端，持有 sidecar 进程的 stdin/stdout
 pub struct RpcClient {
-    calls: Mutex<()>,
     stdin: Mutex<ChildStdin>,
-    responses: Mutex<mpsc::Receiver<Result<String, String>>>,
+    pending: PendingResponses,
     request_id: AtomicU64,
     /// RPC 调用默认超时时间
     timeout: Duration,
@@ -29,32 +30,32 @@ pub struct RpcClient {
 
 impl RpcClient {
     pub fn new(stdin: ChildStdin, stdout: ChildStdout) -> Self {
-        let (tx, rx) = mpsc::channel();
+        let pending = PendingResponses::default();
+        let reader_pending = pending.clone();
         std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             loop {
                 let mut line = String::new();
                 match reader.read_line(&mut line) {
                     Ok(0) => {
-                        let _ = tx.send(Err("Sidecar stdout 已关闭".into()));
+                        fail_pending(&reader_pending, "Sidecar stdout 已关闭");
                         break;
                     }
                     Ok(_) => {
-                        if tx.send(Ok(line)).is_err() {
-                            break;
+                        if let Err(error) = dispatch_response(&reader_pending, line) {
+                            log::warn!("Sidecar 响应分发失败: {error}");
                         }
                     }
                     Err(error) => {
-                        let _ = tx.send(Err(error.to_string()));
+                        fail_pending(&reader_pending, &error.to_string());
                         break;
                     }
                 }
             }
         });
         Self {
-            calls: Mutex::new(()),
             stdin: Mutex::new(stdin),
-            responses: Mutex::new(rx),
+            pending,
             request_id: AtomicU64::new(1),
             timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
         }
@@ -80,11 +81,6 @@ impl RpcClient {
         params: Value,
         timeout: Duration,
     ) -> Result<T, RpcError> {
-        // Sidecar 允许并发处理请求，但桌面端当前不需要并发；整体串行可避免响应串线。
-        let _call_guard = self
-            .calls
-            .lock()
-            .map_err(|_| RpcError::Internal("call lock poisoned".into()))?;
         let id = self.request_id.fetch_add(1, Ordering::SeqCst);
 
         let request = serde_json::json!({
@@ -104,42 +100,44 @@ impl RpcClient {
             timeout.as_secs()
         );
 
+        let (response_tx, response_rx) = mpsc::channel();
+        self.pending
+            .lock()
+            .map_err(|_| RpcError::Internal("pending response lock poisoned".into()))?
+            .insert(id, response_tx);
+
         // 写 stdin
-        {
+        let write_result = (|| -> Result<(), RpcError> {
             let mut stdin = self
                 .stdin
                 .lock()
                 .map_err(|_| RpcError::Internal("stdin lock poisoned".into()))?;
             writeln!(stdin, "{}", request_str).map_err(|e| RpcError::Io(e.to_string()))?;
-            stdin.flush().map_err(|e| RpcError::Io(e.to_string()))?;
+            stdin.flush().map_err(|e| RpcError::Io(e.to_string()))
+        })();
+        if let Err(error) = write_result {
+            self.remove_pending(id);
+            return Err(error);
         }
 
-        // 超时请求的迟到响应可能仍在队列中；按 id 丢弃，直到拿到本次响应。
-        let deadline = Instant::now() + timeout;
-        let response = loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
+        let response_str = match response_rx.recv_timeout(timeout) {
+            Ok(Ok(line)) => line,
+            Ok(Err(error)) => return Err(RpcError::Io(error)),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                self.remove_pending(id);
                 return Err(RpcError::Timeout(timeout.as_secs()));
             }
-            let response_str = self.read_response_with_timeout(remaining)?;
-            if response_str.trim().is_empty() {
-                return Err(RpcError::Io("Sidecar 返回空响应（进程可能已退出）".into()));
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                return Err(RpcError::Io("读取线程异常退出".into()));
             }
-            let response: Value = serde_json::from_str(response_str.trim()).map_err(|e| {
-                RpcError::Deserialize(format!(
-                    "响应解析失败: {} - {}",
-                    e,
-                    &response_str[..response_str.len().min(200)]
-                ))
-            })?;
-            if response.get("id").and_then(Value::as_u64) == Some(id) {
-                break response;
-            }
-            log::warn!(
-                "丢弃非当前 RPC 响应: expected_id={id}, actual_id={:?}",
-                response.get("id")
-            );
         };
+        let response: Value = serde_json::from_str(response_str.trim()).map_err(|e| {
+            RpcError::Deserialize(format!(
+                "响应解析失败: {} - {}",
+                e,
+                &response_str[..response_str.len().min(200)]
+            ))
+        })?;
 
         // 检查 error 字段
         if let Some(err) = response.get("error") {
@@ -160,22 +158,61 @@ impl RpcClient {
             .map_err(|e| RpcError::Deserialize(format!("result 反序列化失败: {}", e)))
     }
 
-    /// 带超时的 stdout 读取。
-    ///
-    /// stdout 由常驻读取线程持有；当前线程只在 channel 上等待，因此超时会立即返回。
-    fn read_response_with_timeout(&self, timeout: Duration) -> Result<String, RpcError> {
-        let responses = self
-            .responses
-            .lock()
-            .map_err(|_| RpcError::Internal("response lock poisoned".into()))?;
-        match responses.recv_timeout(timeout) {
-            Ok(Ok(line)) => Ok(line),
-            Ok(Err(error)) => Err(RpcError::Io(error)),
-            Err(mpsc::RecvTimeoutError::Timeout) => Err(RpcError::Timeout(timeout.as_secs())),
-            Err(mpsc::RecvTimeoutError::Disconnected) => {
-                Err(RpcError::Io("读取线程异常退出".into()))
-            }
+    fn remove_pending(&self, id: u64) {
+        if let Ok(mut pending) = self.pending.lock() {
+            pending.remove(&id);
         }
+    }
+}
+
+fn dispatch_response(pending: &PendingResponses, line: String) -> Result<(), String> {
+    let response: Value = serde_json::from_str(line.trim()).map_err(|error| error.to_string())?;
+    let id = response
+        .get("id")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "响应缺少数字 id".to_string())?;
+    let sender = pending
+        .lock()
+        .map_err(|_| "pending response lock poisoned".to_string())?
+        .remove(&id)
+        .ok_or_else(|| format!("响应 id={id} 已超时或不存在"))?;
+    sender
+        .send(Ok(line))
+        .map_err(|_| format!("响应 id={id} 的接收端已关闭"))
+}
+
+fn fail_pending(pending: &PendingResponses, error: &str) {
+    let senders = pending
+        .lock()
+        .map(|mut pending| {
+            pending
+                .drain()
+                .map(|(_, sender)| sender)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for sender in senders {
+        let _ = sender.send(Err(error.to_string()));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dispatches_out_of_order_responses_to_matching_calls() {
+        let pending = PendingResponses::default();
+        let (first_tx, first_rx) = mpsc::channel();
+        let (second_tx, second_rx) = mpsc::channel();
+        pending.lock().unwrap().insert(1, first_tx);
+        pending.lock().unwrap().insert(2, second_tx);
+
+        dispatch_response(&pending, r#"{"jsonrpc":"2.0","id":2,"result":"b"}"#.into()).unwrap();
+        dispatch_response(&pending, r#"{"jsonrpc":"2.0","id":1,"result":"a"}"#.into()).unwrap();
+
+        assert!(second_rx.recv().unwrap().unwrap().contains("\"b\""));
+        assert!(first_rx.recv().unwrap().unwrap().contains("\"a\""));
     }
 }
 
