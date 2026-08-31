@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { ref, shallowRef } from 'vue'
 import { check } from '@tauri-apps/plugin-updater'
 import { relaunch } from '@tauri-apps/plugin-process'
 import { getVersion } from '@tauri-apps/api/app'
@@ -27,8 +27,8 @@ export function useAppUpdater() {
   const downloadIndeterminate = ref(false)
   const statusText = ref('')
   const errorText = ref('')
-  /** check() 返回的更新对象；安装前保持引用 */
-  const pendingUpdate = ref<Awaited<ReturnType<typeof check>>>(null)
+  /** check() 返回带私有字段的类实例；必须保持原对象，不能被 Vue 深层代理 */
+  const pendingUpdate = shallowRef<Awaited<ReturnType<typeof check>>>(null)
 
   function reset() {
     phase.value = 'idle'
