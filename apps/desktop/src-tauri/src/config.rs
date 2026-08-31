@@ -159,6 +159,12 @@ fn builtin_sources() -> Vec<SourceConfig> {
             scan_dirs: default_codebuddy_scan_dirs(),
         },
         SourceConfig {
+            id: "grok".to_string(),
+            name: "Grok".to_string(),
+            enabled: true,
+            scan_dirs: vec!["~/.grok/sessions".to_string()],
+        },
+        SourceConfig {
             id: "omp".to_string(),
             name: "Oh My Pi".to_string(),
             enabled: true,
@@ -464,7 +470,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn defaults_have_six_sources_and_one_profile() {
+    fn defaults_have_seven_sources_and_one_profile() {
         let config = AppConfig::default();
         let ids: Vec<&str> = config
             .collector
@@ -474,7 +480,15 @@ mod tests {
             .collect();
         assert_eq!(
             ids,
-            vec!["claude-code", "cursor", "codex", "codebuddy", "omp", "pi"]
+            vec![
+                "claude-code",
+                "cursor",
+                "codex",
+                "codebuddy",
+                "grok",
+                "omp",
+                "pi"
+            ]
         );
         assert_eq!(config.distiller.profiles.len(), 1);
         assert_eq!(config.distiller.active_profile_id, "default");

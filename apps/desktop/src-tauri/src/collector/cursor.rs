@@ -64,7 +64,7 @@ impl CursorCollector {
                 continue;
             }
             batch.found += 1;
-            let (raw_mtime_ms, raw_size_bytes) = match sqlite_fingerprint(&global_db_path) {
+            let (raw_mtime_ms, raw_size_bytes) = match cursor_fingerprint(&global_db_path) {
                 Some(fingerprint) => fingerprint,
                 None => continue,
             };
@@ -109,7 +109,8 @@ impl CursorCollector {
         raw_size_bytes: i64,
     ) -> Result<CollectionBatch, Box<dyn std::error::Error>> {
         // Step 1: 扫描所有 workspace，建立 composerId → (project_path, name) 映射
-        let workspace_map = scan_workspaces(ws_base)?;
+        let mut workspace_map = scan_workspaces(ws_base)?;
+        workspace_map.extend(read_global_composers(global_db_path, ws_base)?);
         log::debug!("发现 {} 个 workspace", workspace_map.len());
 
         // Step 2: 打开全局数据库（只读），读取所有 composer 的 bubble 数据
@@ -156,6 +157,13 @@ fn sqlite_fingerprint(db_path: &Path) -> Option<(i64, i64)> {
         fingerprint.0 = fingerprint.0.max(mtime);
         fingerprint.1 = fingerprint.1.saturating_add(size);
     }
+    Some(fingerprint)
+}
+
+fn cursor_fingerprint(global_db_path: &Path) -> Option<(i64, i64)> {
+    let mut fingerprint = sqlite_fingerprint(global_db_path)?;
+    // ponytail: 指纹版本放在 size 盐值里；新增解析格式时递增即可触发一次补采，无需新增迁移表。
+    fingerprint.1 = fingerprint.1.saturating_add(1);
     Some(fingerprint)
 }
 
@@ -230,6 +238,62 @@ fn scan_workspaces(
         }
     }
 
+    Ok(map)
+}
+
+/// 新版 Cursor 将全部会话头集中到全局库的 composerHeaders 表。
+fn read_global_composers(
+    global_db_path: &Path,
+    ws_base: &Path,
+) -> Result<HashMap<String, WorkspaceInfo>, Box<dyn std::error::Error>> {
+    let conn = Connection::open_with_flags(
+        global_db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    let mut map = HashMap::new();
+    let mut statement = match conn.prepare(
+        "SELECT composerId,workspaceId,createdAt,value FROM composerHeaders WHERE COALESCE(isSubagent,0)=0",
+    ) {
+        Ok(statement) => statement,
+        Err(_) => return Ok(map),
+    };
+    let rows = statement.query_map([], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, Option<String>>(1)?,
+            row.get::<_, Option<i64>>(2)?,
+            row.get::<_, String>(3)?,
+        ))
+    })?;
+    for row in rows {
+        let (id, workspace_id, created_at, value) = row?;
+        let header: serde_json::Value = serde_json::from_str(&value)?;
+        let workspace = &header["workspaceIdentifier"];
+        let project_path = workspace
+            .pointer("/uri/fsPath")
+            .or_else(|| workspace.pointer("/configPath/fsPath"))
+            .and_then(serde_json::Value::as_str)
+            .map(String::from)
+            .or_else(|| {
+                workspace_id.as_deref().and_then(|workspace_id| {
+                    read_workspace_project_path(&ws_base.join(workspace_id).join("workspace.json"))
+                })
+            });
+        let project_name = project_path
+            .as_deref()
+            .and_then(|path| Path::new(path).file_name())
+            .and_then(|name| name.to_str())
+            .map(String::from);
+        map.insert(
+            id,
+            WorkspaceInfo {
+                project_path,
+                project_name,
+                composer_name: header["name"].as_str().map(String::from),
+                created_at,
+            },
+        );
+    }
     Ok(map)
 }
 
@@ -505,6 +569,86 @@ fn millis_to_rfc3339(ms: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collects_modern_global_composer_headers_without_legacy_workspace_index() {
+        let root = tempfile::tempdir().unwrap();
+        let global_dir = root.path().join("User/globalStorage");
+        std::fs::create_dir_all(&global_dir).unwrap();
+        let db_path = global_dir.join("state.vscdb");
+        let conn = Connection::open(&db_path).unwrap();
+        conn.execute(
+            "CREATE TABLE composerHeaders (composerId TEXT PRIMARY KEY, workspaceId TEXT, createdAt INTEGER, isSubagent INTEGER, value TEXT)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT)",
+            [],
+        )
+        .unwrap();
+        let headers = serde_json::json!({"allComposers":[
+            {
+                "composerId":"modern-1",
+                "name":"Modern chat",
+                "createdAt":1760000000000_i64,
+                "workspaceIdentifier":{"uri":{"fsPath":"/tmp/modern-project"}}
+            },
+            {
+                "composerId":"subagent-1",
+                "createdAt":1760000000000_i64,
+                "subagentInfo":{"subagentTypeName":"explore"}
+            }
+        ]});
+        for header in headers["allComposers"].as_array().unwrap() {
+            conn.execute(
+                "INSERT INTO composerHeaders(composerId,workspaceId,createdAt,isSubagent,value) VALUES(?1,?2,?3,?4,?5)",
+                rusqlite::params![
+                    header["composerId"].as_str(),
+                    header.pointer("/workspaceIdentifier/id").and_then(serde_json::Value::as_str),
+                    header["createdAt"].as_i64(),
+                    i64::from(header["subagentInfo"].is_object()),
+                    header.to_string(),
+                ],
+            )
+            .unwrap();
+        }
+        let conversation = serde_json::json!({
+            "createdAt":1760000000000_i64,
+            "fullConversationHeadersOnly":[
+                {"bubbleId":"user-1","type":1},
+                {"bubbleId":"assistant-1","type":2}
+            ]
+        });
+        conn.execute(
+            "INSERT INTO cursorDiskKV(key,value) VALUES('composerData:modern-1',?1)",
+            [conversation.to_string()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO cursorDiskKV(key,value) VALUES('bubbleId:modern-1:user-1',?1)",
+            [serde_json::json!({"text":"hello","createdAt":1760000001000_i64}).to_string()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO cursorDiskKV(key,value) VALUES('bubbleId:modern-1:assistant-1',?1)",
+            [serde_json::json!({"text":"hi","createdAt":1760000002000_i64}).to_string()],
+        )
+        .unwrap();
+        drop(conn);
+
+        let batch =
+            CursorCollector::new(vec![root.path().to_path_buf()]).collect_changed(|_, _, _| false);
+
+        assert!(batch.failures.is_empty());
+        assert_eq!(batch.sessions.len(), 1);
+        assert_eq!(batch.sessions[0].session_id, "modern-1");
+        assert_eq!(
+            batch.sessions[0].project_name.as_deref(),
+            Some("modern-project")
+        );
+        assert_eq!(batch.sessions[0].messages.len(), 2);
+    }
 
     #[test]
     fn test_extract_lexical_text_simple() {

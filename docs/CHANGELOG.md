@@ -5,6 +5,19 @@
 
 ---
 
+## 0.2.3（2026-08-31）
+
+### 采集与 Provider
+
+- 新增 Grok JSONL 采集器，读取 `~/.grok/sessions` 的 `summary.json` 与 `chat_history.jsonl`，过滤 synthetic user、subagent 及 ChatTake 自生成提炼会话。
+- 新增 Grok CLI Provider，通过临时 prompt 文件和只读 sandbox 调用 `grok`，对话正文不进入 argv；未新增 xAI API Provider。
+- Cursor 兼容新版全局 `composerHeaders` 表并排除 subagent；指纹版本盐确保升级后补扫一次，随后恢复增量同步。
+
+### 桌面体验
+
+- 会话列表与知识列表使用 KeepAlive 保留组件状态，返回详情来源时维持筛选、页码、选择和内层滚动位置；激活刷新不再卸载已有列表。
+- Grok 来源在侧栏、会话列表、详情和设置中使用一致标签、图标及无障碍名称。
+
 ## 0.2.2（2026-08-31）
 
 ### 桌面更新

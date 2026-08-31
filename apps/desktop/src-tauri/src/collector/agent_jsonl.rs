@@ -191,7 +191,7 @@ fn parse_agent_jsonl(
     }))
 }
 
-fn visible_text(content: Option<&Value>) -> String {
+pub(super) fn visible_text(content: Option<&Value>) -> String {
     match content {
         Some(Value::String(text)) => text.trim().to_string(),
         Some(Value::Array(parts)) => parts

@@ -206,6 +206,7 @@ const sourceIcon = computed(() => {
     'claude-code': 'i-lucide-terminal',
     codex: 'i-lucide-code-2',
     cursor: 'i-lucide-mouse-pointer-click',
+    grok: 'i-lucide-sparkles',
     omp: 'i-lucide-orbit',
     pi: 'i-lucide-circle-dot',
     codebuddy: 'i-lucide-code',

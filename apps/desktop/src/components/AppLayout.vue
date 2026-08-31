@@ -22,7 +22,11 @@ onMounted(async () => {
     <div class="flex flex-1 min-h-0">
       <Sidebar />
       <main class="flex-1 min-w-0 min-h-0 overflow-hidden" style="background: var(--paper)">
-        <router-view />
+        <router-view v-slot="{ Component }">
+          <keep-alive include="SessionsView,KnowledgeView">
+            <component :is="Component" />
+          </keep-alive>
+        </router-view>
       </main>
     </div>
   </div>

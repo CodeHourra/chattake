@@ -8,7 +8,7 @@ import { buildCliInvocation, CliProvider } from './cli-provider'
 describe('CLI Provider invocation', () => {
   test('keeps conversation content out of argv and applies safe flags', () => {
     const secret = 'private conversation'
-    const cases = ['claude-code', 'codex', 'cursor', 'omp', 'pi', 'codebuddy']
+    const cases = ['claude-code', 'codex', 'cursor', 'grok', 'omp', 'pi', 'codebuddy']
     for (const provider of cases) {
       const result = buildCliInvocation(
         { provider, command: provider, model: 'model-id' },
@@ -16,7 +16,12 @@ describe('CLI Provider invocation', () => {
       )
       expect(result.args.join(' ')).not.toContain(secret)
       expect(result.args).toContain('model-id')
-      if (provider === 'omp' || provider === 'pi') {
+      if (provider === 'grok') {
+        expect(result.inputMode).toBe('file')
+        expect(result.args).toContain('--prompt-file')
+        expect(result.args).toContain('--cwd')
+        expect(result.args.at(-1)).toBe('/tmp/prompt.txt')
+      } else if (provider === 'omp' || provider === 'pi') {
         expect(result.args.at(-1)).toBe('@/tmp/prompt.txt')
       }
     }

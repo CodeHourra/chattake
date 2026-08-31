@@ -14,5 +14,6 @@ pub mod claude_code;
 pub mod codebuddy;
 pub mod codex;
 pub mod cursor;
+pub mod grok;
 pub mod normalizer;
 pub mod scheduler;
