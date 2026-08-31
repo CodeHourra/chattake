@@ -30,7 +30,7 @@ const status = computed(() => {
   return { label: '已判断', tone: 'quiet' }
 })
 const sourceLabel = computed(() => ({
-  'claude-code': 'Claude Code', codex: 'Codex', cursor: 'Cursor', omp: 'Oh My Pi', pi: 'Pi', codebuddy: 'CodeBuddy',
+  'claude-code': 'Claude Code', codex: 'Codex', cursor: 'Cursor', grok: 'Grok', omp: 'Oh My Pi', pi: 'Pi', codebuddy: 'CodeBuddy',
 }[props.session.sourceId] ?? props.session.sourceId))
 
 function relativeTime(value: string | null | undefined) {

@@ -25,6 +25,7 @@ use super::claude_code::ClaudeCodeCollector;
 use super::codebuddy::CodeBuddyCollector;
 use super::codex::CodexCollector;
 use super::cursor::CursorCollector;
+use super::grok::GrokCollector;
 use super::normalizer::{CollectionBatch, NormalizedSession};
 
 /// 同步结果统计
@@ -95,6 +96,14 @@ impl<'a> CollectorScheduler<'a> {
             }
             "codex" => {
                 let collector = CodexCollector::new(scan_dirs);
+                collector.collect_changed(|path, mtime, size| {
+                    self.db
+                        .source_file_unchanged(&source.id, path, mtime, size)
+                        .unwrap_or(false)
+                })
+            }
+            "grok" => {
+                let collector = GrokCollector::new(scan_dirs);
                 collector.collect_changed(|path, mtime, size| {
                     self.db
                         .source_file_unchanged(&source.id, path, mtime, size)

@@ -25,6 +25,7 @@ const providerPresets = [
   { label: 'CLI · Claude Code', value: 'claude-code', kind: 'cli' as const, baseUrl: '', command: 'claude' },
   { label: 'CLI · Codex', value: 'codex', kind: 'cli' as const, baseUrl: '', command: 'codex' },
   { label: 'CLI · Cursor', value: 'cursor', kind: 'cli' as const, baseUrl: '', command: 'cursor-agent' },
+  { label: 'CLI · Grok', value: 'grok', kind: 'cli' as const, baseUrl: '', command: 'grok' },
   { label: 'CLI · OMP', value: 'omp', kind: 'cli' as const, baseUrl: '', command: 'omp' },
   { label: 'CLI · Pi', value: 'pi', kind: 'cli' as const, baseUrl: '', command: 'pi' },
   { label: 'CLI · CodeBuddy', value: 'codebuddy', kind: 'cli' as const, baseUrl: '', command: 'codebuddy' },
@@ -337,18 +338,18 @@ function close() { emit('update:show', false) }
         <n-tab-pane name="sources" tab="数据源">
           <div class="settings-scroll py-3 space-y-2">
             <n-alert type="info" :bordered="false" class="!text-xs mb-3">
-              支持 Claude Code、Cursor、Codex、CodeBuddy、OMP 和 Pi。启动扫描只发现变化，不会自动调用模型。
+              支持 Claude Code、Cursor、Codex、CodeBuddy、Grok、OMP 和 Pi。启动扫描只发现变化，不会自动调用模型。
             </n-alert>
             <div v-for="source in workingConfig.collector.sources" :key="source.id" class="source-row">
               <div class="min-w-0">
                 <div class="flex items-center gap-2"><strong class="text-sm">{{ source.name }}</strong><n-tag size="tiny">{{ source.id }}</n-tag></div>
                 <p v-for="dir in source.scanDirs" :key="dir" class="text-xs text-neutral-400 font-mono truncate mt-1">{{ dir }}</p>
               </div>
-              <n-switch :value="source.enabled" @update:value="(value: boolean) => setSourceEnabled(source, value)" />
+              <n-switch :value="source.enabled" :aria-label="`${source.name} 数据源`" @update:value="(value: boolean) => setSourceEnabled(source, value)" />
             </div>
             <div class="source-row">
               <div><strong class="text-sm">启动时扫描变化</strong><p class="text-xs text-neutral-400 mt-1">只采集，不分析，不消耗 Token</p></div>
-              <n-switch v-model:value="workingConfig.sync.scanOnStartup" />
+              <n-switch v-model:value="workingConfig.sync.scanOnStartup" aria-label="启动时扫描变化" />
             </div>
           </div>
         </n-tab-pane>

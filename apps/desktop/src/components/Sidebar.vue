@@ -60,6 +60,7 @@ const SOURCE_META: Record<string, { label: string; imgIcon?: string; darkImgIcon
   'cursor': { label: 'Cursor', imgIcon: cursorLightIcon, darkImgIcon: cursorDarkIcon, fallbackIcon: 'i-lucide-mouse-pointer-click' },
   codebuddy: { label: 'CodeBuddy', imgIcon: codebuddyIcon, fallbackIcon: 'i-lucide-code' },
   codex: { label: 'Codex', imgIcon: openaiIcon, fallbackIcon: 'i-lucide-code-2' },
+  grok: { label: 'Grok', fallbackIcon: 'i-lucide-sparkles' },
   omp: { label: 'Oh My Pi', imgIcon: ompLightIcon, darkImgIcon: ompDarkIcon, fallbackIcon: 'i-lucide-orbit' },
   pi: { label: 'Pi', imgIcon: piLightIcon, darkImgIcon: piDarkIcon, fallbackIcon: 'i-lucide-circle-dot' },
 }

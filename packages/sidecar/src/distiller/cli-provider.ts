@@ -1,7 +1,7 @@
 import { accessSync, constants, existsSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { basename, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 
 import { CONTENT_HINT } from './prompts'
 import type { DistillResult } from './api-provider'
@@ -59,6 +59,11 @@ export function buildCliInvocation(
       return {
         args: ['-p', '--output-format', 'text', '--mode', 'ask', '--sandbox', 'enabled', '--trust', ...(model ? ['--model', model] : [])],
         inputMode: 'stdin',
+      }
+    case 'grok':
+      return {
+        args: ['--output-format', 'plain', '--tools', '', '--no-subagents', '--disable-web-search', '--permission-mode', 'dontAsk', '--sandbox', 'read-only', '--no-auto-update', '--cwd', dirname(promptPath ?? '.'), ...(model ? ['--model', model] : []), '--prompt-file', promptPath ?? ''],
+        inputMode: 'file',
       }
     case 'omp':
       return {

@@ -46,7 +46,6 @@ function plainSnippet(value: string | null) {
 // ── 生命周期 ─────────────────────────────────────────────────────────────────
 
 onMounted(() => {
-  void sessions.loadPage()
   void api
     .countAllCards()
     .then((n) => {
@@ -254,7 +253,7 @@ function openSearchHit(cardId: string, sessionId: string) {
 
     <!-- 会话列表 -->
     <template v-else>
-      <div v-if="sessions.loading" class="flex-1 flex items-center justify-center">
+      <div v-if="sessions.loading && !sessions.items.length" class="flex-1 flex items-center justify-center">
         <n-spin size="medium" />
       </div>
 

@@ -33,6 +33,15 @@ command = "codex"
 model = ""
 timeout_secs = 120
 
+[[distiller.profiles]]
+id = "grok-local"
+name = "本地 Grok"
+kind = "cli"
+provider = "grok"
+command = "grok"
+model = ""
+timeout_secs = 120
+
 [sync]
 scan_on_startup = true
 
@@ -59,6 +68,12 @@ id = "codebuddy"
 name = "CodeBuddy"
 enabled = false
 scan_dirs = ["~/Library/Application Support/CodeBuddyExtension/Data", "~/.local/share/CodeBuddyExtension"]
+
+[[collector.sources]]
+id = "grok"
+name = "Grok"
+enabled = true
+scan_dirs = ["~/.grok/sessions"]
 
 [[collector.sources]]
 id = "omp"

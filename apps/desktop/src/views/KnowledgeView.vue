@@ -4,7 +4,7 @@
  *
  * 视图模式持久化：localStorage key `chattake:knowledgeViewMode`
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NSpin,
@@ -106,8 +106,9 @@ async function mergeSelectedTags() {
 onMounted(() => {
   const raw = localStorage.getItem(VIEW_MODE_KEY)
   if (raw === 'list' || raw === 'card') viewMode.value = raw
-  void load()
 })
+
+onActivated(load)
 
 watch(
   [
@@ -331,7 +332,7 @@ function onExportSelect(key: string | number) {
 
     <!-- 内容区 -->
     <div class="flex-1 min-h-0 overflow-y-auto pb-32">
-      <div v-if="loading" class="flex items-center justify-center py-24">
+      <div v-if="loading && !items.length" class="flex items-center justify-center py-24">
         <n-spin size="medium" />
       </div>
 
