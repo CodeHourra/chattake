@@ -103,6 +103,10 @@ watch(() => [props.sessionId, route.query.cardId], () => {
 // ────────────── 操作 ──────────────
 
 function close() {
+  if (router.options.history.state.back) {
+    router.back()
+    return
+  }
   void router.push({ name: 'sessions' })
 }
 
