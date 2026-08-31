@@ -1,5 +1,6 @@
 use chrono::Utc;
 use rusqlite::{params, OptionalExtension, Row};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 use super::db::{Database, DbError, DbResult};
@@ -61,6 +62,29 @@ impl Database {
         let now = Utc::now().to_rfc3339();
         let mut conn = self.conn();
         let tx = conn.transaction()?;
+        if kind == "analysis" {
+            let mut seen = HashSet::new();
+            for session_id in items.iter().filter_map(|item| item.session_id) {
+                if !seen.insert(session_id) {
+                    return Err(DbError::Invalid(format!(
+                        "同一会话不能重复加入分析任务：{session_id}"
+                    )));
+                }
+                let active = tx
+                    .query_row(
+                        "SELECT 1 FROM job_items WHERE session_id=?1 AND status IN ('queued','running') LIMIT 1",
+                        params![session_id],
+                        |_| Ok(()),
+                    )
+                    .optional()?
+                    .is_some();
+                if active {
+                    return Err(DbError::Invalid(format!(
+                        "会话已在分析队列中：{session_id}"
+                    )));
+                }
+            }
+        }
         let (profile_id, provider, base_url, model) = profile
             .map(|value| (Some(value.0), Some(value.1), Some(value.2), Some(value.3)))
             .unwrap_or((None, None, None, None));
@@ -327,6 +351,100 @@ mod tests {
             .collect::<Result<_, _>>()
             .unwrap();
         assert!(!columns.iter().any(|column| column == "api_key"));
+    }
+
+    #[test]
+    fn rejects_duplicate_active_analysis_sessions() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("jobs.db")).unwrap();
+        let session = db
+            .insert_session(
+                "codex",
+                "duplicate",
+                "local",
+                None,
+                None,
+                0,
+                None,
+                "/tmp/x",
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z",
+                None,
+            )
+            .unwrap();
+        let items = [NewJobItem {
+            session_id: Some(&session),
+            source_id: None,
+            raw_path: None,
+        }];
+        let duplicate_items = [
+            NewJobItem {
+                session_id: Some(&session),
+                source_id: None,
+                raw_path: None,
+            },
+            NewJobItem {
+                session_id: Some(&session),
+                source_id: None,
+                raw_path: None,
+            },
+        ];
+        let error = db
+            .create_job("analysis", "queued", None, &duplicate_items)
+            .unwrap_err();
+        assert!(error.to_string().contains("重复加入"));
+
+        db.create_job("analysis", "queued", None, &items).unwrap();
+
+        let error = db
+            .create_job("analysis", "queued", None, &items)
+            .unwrap_err();
+        assert!(error.to_string().contains("已在分析队列中"));
+    }
+
+    #[test]
+    fn cancelling_running_item_releases_session_for_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("jobs.db")).unwrap();
+        let session = db
+            .insert_session(
+                "codex",
+                "cancelled",
+                "local",
+                None,
+                None,
+                0,
+                None,
+                "/tmp/x",
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z",
+                None,
+            )
+            .unwrap();
+        let items = [NewJobItem {
+            session_id: Some(&session),
+            source_id: None,
+            raw_path: None,
+        }];
+        let job = db.create_job("analysis", "queued", None, &items).unwrap();
+        db.mark_job_running(&job.id, "judging").unwrap();
+        db.mark_item_running(&job.items[0].id, "judging").unwrap();
+        db.request_job_cancel(&job.id).unwrap();
+        db.finish_item(
+            &job.id,
+            &job.items[0].id,
+            "cancelled",
+            "cancelled",
+            0,
+            Some("用户取消"),
+        )
+        .unwrap();
+        db.finish_job(&job.id, "cancelled", None).unwrap();
+
+        let cancelled = db.get_job(&job.id).unwrap();
+        assert_eq!(cancelled.done, cancelled.total);
+        assert_eq!(cancelled.items[0].status, "cancelled");
+        assert!(db.create_job("analysis", "queued", None, &items).is_ok());
     }
 
     #[test]

@@ -16,7 +16,8 @@ pub mod rpc;
 
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use rpc::{RpcClient, RpcError};
 use serde::de::DeserializeOwned;
@@ -29,18 +30,35 @@ pub struct SidecarManager {
     /// 运行中的子进程
     process: Mutex<Option<Child>>,
     /// RPC 客户端（进程启动后创建）
-    client: Mutex<Option<RpcClient>>,
+    client: Mutex<Option<Arc<RpcClient>>>,
     /// sidecar 二进制路径
     binary_path: PathBuf,
+    /// 任务取消后禁止 RPC 自动重启该 worker。
+    cancelled: AtomicBool,
+    /// 独立分析 worker 退出后必须让当前条目失败，不能无 init 自动重启。
+    restartable: bool,
+    started: AtomicBool,
 }
 
 impl SidecarManager {
     pub fn new(binary_path: PathBuf) -> Self {
+        Self::with_restart(binary_path, true)
+    }
+
+    fn with_restart(binary_path: PathBuf, restartable: bool) -> Self {
         Self {
             process: Mutex::new(None),
             client: Mutex::new(None),
             binary_path,
+            cancelled: AtomicBool::new(false),
+            restartable,
+            started: AtomicBool::new(false),
         }
+    }
+
+    /// 为一个分析条目创建独立进程管理器，隔离超时、取消与 Provider 状态。
+    pub fn worker(&self) -> Self {
+        Self::with_restart(self.binary_path.clone(), false)
     }
 
     /// 查找 sidecar 二进制路径。
@@ -124,9 +142,15 @@ impl SidecarManager {
             .lock()
             .map_err(|_| RpcError::Internal("process lock poisoned".into()))?;
 
+        if self.cancelled.load(Ordering::Acquire) {
+            return Err(RpcError::Internal("Sidecar 任务已取消".into()));
+        }
         if proc_guard.is_some() {
             log::debug!("Sidecar 已在运行中");
             return Ok(());
+        }
+        if self.started.load(Ordering::Acquire) && !self.restartable {
+            return Err(RpcError::Internal("Sidecar worker 已退出".into()));
         }
 
         log::info!("启动 sidecar: {}", self.binary_path.display());
@@ -154,10 +178,17 @@ impl SidecarManager {
             .client
             .lock()
             .map_err(|_| RpcError::Internal("client lock poisoned".into()))?;
-        *client_guard = Some(rpc_client);
+        *client_guard = Some(Arc::new(rpc_client));
+        self.started.store(true, Ordering::Release);
 
         log::info!("Sidecar 启动成功");
         Ok(())
+    }
+
+    /// 取消任务并永久停止当前 worker，避免并发竞态触发自动重启。
+    pub fn cancel(&self) -> Result<(), RpcError> {
+        self.cancelled.store(true, Ordering::Release);
+        self.stop()
     }
 
     /// 停止 sidecar 进程
@@ -246,13 +277,12 @@ impl SidecarManager {
             self.start()?;
         }
 
-        let client_guard = self
+        let client = self
             .client
             .lock()
-            .map_err(|_| RpcError::Internal("client lock poisoned".into()))?;
-
-        let client = client_guard
+            .map_err(|_| RpcError::Internal("client lock poisoned".into()))?
             .as_ref()
+            .cloned()
             .ok_or_else(|| RpcError::Internal("RPC 客户端未就绪".into()))?;
 
         client.call(method, params)
@@ -269,16 +299,14 @@ impl SidecarManager {
             self.start()?;
         }
 
-        let result = {
-            let client_guard = self
-                .client
-                .lock()
-                .map_err(|_| RpcError::Internal("client lock poisoned".into()))?;
-            let client = client_guard
-                .as_ref()
-                .ok_or_else(|| RpcError::Internal("RPC 客户端未就绪".into()))?;
-            client.call_with_timeout(method, params, timeout)
-        };
+        let client = self
+            .client
+            .lock()
+            .map_err(|_| RpcError::Internal("client lock poisoned".into()))?
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| RpcError::Internal("RPC 客户端未就绪".into()))?;
+        let result = client.call_with_timeout(method, params, timeout);
         if matches!(result, Err(RpcError::Timeout(_))) {
             let _ = self.stop();
         }
@@ -289,5 +317,29 @@ impl SidecarManager {
 impl Drop for SidecarManager {
     fn drop(&mut self) {
         let _ = self.stop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cancelled_worker_cannot_restart() {
+        let worker = SidecarManager::new(PathBuf::from("missing-sidecar"));
+        worker.cancel().unwrap();
+        assert!(
+            matches!(worker.start(), Err(RpcError::Internal(message)) if message.contains("已取消"))
+        );
+    }
+
+    #[test]
+    fn analysis_worker_does_not_restart_without_init() {
+        let root = SidecarManager::new(PathBuf::from("missing-sidecar"));
+        let worker = root.worker();
+        worker.started.store(true, Ordering::Release);
+        assert!(
+            matches!(worker.start(), Err(RpcError::Internal(message)) if message.contains("已退出"))
+        );
     }
 }

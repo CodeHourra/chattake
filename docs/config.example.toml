@@ -2,6 +2,7 @@
 
 [distiller]
 active_profile_id = "siliconflow-main"
+max_concurrent_analyses = 2
 
 [[distiller.profiles]]
 id = "siliconflow-main"

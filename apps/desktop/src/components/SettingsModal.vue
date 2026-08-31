@@ -243,6 +243,19 @@ function close() { emit('update:show', false) }
             <n-alert type="info" :bordered="false" class="!text-xs mb-3">
               每个分析任务固定使用启动时选中的配置；失败后不会自动跨供应商切换。
             </n-alert>
+            <div class="concurrency-setting">
+              <div>
+                <strong class="text-sm">并行分析数</strong>
+                <p class="text-xs text-neutral-400 mt-1">全局同时处理的会话数量；提高后会增加 API 请求或本地 CLI 进程占用。</p>
+              </div>
+              <n-input-number
+                v-model:value="workingConfig.distiller.maxConcurrentAnalyses"
+                :min="1"
+                :max="8"
+                :precision="0"
+                aria-label="并行分析数"
+              />
+            </div>
             <div class="profile-layout">
               <aside class="profile-list" aria-label="分析 Provider 配置列表">
                 <button
@@ -392,6 +405,8 @@ function close() { emit('update:show', false) }
 <style scoped>
 .settings-shell { width: min(860px, calc(100vw - 32px)); max-height: 84vh; overflow: hidden; border-radius: 16px; }
 .settings-scroll { max-height: calc(76vh - 190px); overflow-y: auto; }
+.concurrency-setting { display:flex; align-items:center; justify-content:space-between; gap:20px; margin-bottom:16px; padding:2px 0 14px; border-bottom:1px solid var(--n-border-color); }
+.concurrency-setting :deep(.n-input-number) { width:112px; flex-shrink:0; }
 .profile-layout { display: grid; grid-template-columns: 190px minmax(0, 1fr); gap: 16px; }
 .profile-list { display: flex; flex-direction: column; gap: 6px; padding-right: 12px; border-right: 1px solid var(--n-border-color); }
 .profile-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 38px; padding: 8px 10px; border: 1px solid transparent; border-radius: 10px; text-align: left; color: inherit; }

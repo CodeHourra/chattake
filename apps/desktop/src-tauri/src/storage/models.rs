@@ -44,6 +44,9 @@ pub struct Session {
     pub analyzed_at: Option<String>,
     /// 分析失败时的错误信息
     pub error_message: Option<String>,
+    /// 当前会话最新生成的知识卡片
+    #[serde(default)]
+    pub card_id: Option<String>,
 }
 
 /// 会话列表轻量版（列表所需路径 / 首条 user 预览等；不含 content_hash）

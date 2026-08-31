@@ -70,7 +70,8 @@
 
 ## 全局分析队列（Pinia）
 
-- **Store**：`stores/analysisQueue.ts` — `enqueue` / `cancel` / `clear`，内部**串行**调用 `distill_session`（与 Sidecar 单通道一致）。
-- **入口统一**：会话列表单条「分析」、批量「开始分析」、详情页「提炼笔记 / 重新分析」均通过 `enqueue` 入队。
-- **UI**：`components/AnalysisQueuePanel.vue` 由顶栏「进度中心」入口打开，任意页面可在弹窗中查看进度、耗时与失败明细，并取消或重试任务；不再使用会遮挡正文或分页的右下角悬浮层。
-- **批量完成 Toast**：`SessionsView` 对批量入队的任务在 callbacks 中计数，全部结束后提示成功/失败条数。
+- **调度**：Rust 任务层按 `distiller.max_concurrent_analyses`（1–8，默认 2）限制全局并发；每个运行中的分析条目使用独立 Sidecar 进程，超时、取消与 Provider 配置互不影响，同步任务仍与分析任务互斥。
+- **Store**：`stores/analysisQueue.ts` 统一接收后端任务快照，支持取消、重试、清除全部已完成任务或单独清除某个任务。
+- **入口统一**：会话列表单条「分析」、批量「开始分析」、详情页「提炼笔记 / 重新分析」均通过 `startAnalysis` 创建后端任务。
+- **UI**：`components/AnalysisQueuePanel.vue` 由顶栏「进度中心」入口打开，任意页面可在弹窗中查看并行进度、耗时与失败明细，并取消、重试或单独清除同步任务；不再使用会遮挡正文或分页的右下角悬浮层。并行数在「设置 → AI 配置」中热更新。
+- **批量入队 Toast**：`SessionsView` 在任务创建成功或失败时即时反馈；后续阶段与结果统一在进度中心展示。

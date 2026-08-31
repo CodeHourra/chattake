@@ -39,7 +39,6 @@ export const useAnalysisQueueStore = defineStore('analysisQueue', () => {
         ? Math.max(0, Math.floor((clock.value - Date.parse(item.startedAt)) / 1000)) : 0,
     }))))
 
-  const currentTask = computed(() => tasks.value.find((task) => task.status === 'running') ?? null)
   const pendingCount = computed(() => tasks.value.filter((task) => task.status === 'pending').length)
   const totalCount = computed(() => jobs.value.reduce((sum, job) => sum + job.total, 0))
   const doneCount = computed(() => jobs.value.reduce((sum, job) => sum + job.done, 0))
@@ -64,8 +63,8 @@ export const useAnalysisQueueStore = defineStore('analysisQueue', () => {
 
   async function startAnalysis(sessionIds: string[], providerProfileId?: string) {
     const sessions = useSessionsStore()
-    sessionIds.forEach((id) => sessions.patchItem(id, { status: 'analyzing' }))
     const job = await api.startAnalysis(sessionIds, providerProfileId)
+    sessionIds.forEach((id) => sessions.patchItem(id, { status: 'analyzing' }))
     upsert(job)
     return job
   }
@@ -87,7 +86,11 @@ export const useAnalysisQueueStore = defineStore('analysisQueue', () => {
     return job
   }
 
-  function clear() { jobs.value = jobs.value.filter((job) => !terminal.has(job.status)) }
+  function clear(jobId?: string) {
+    jobs.value = jobs.value.filter((job) =>
+      !terminal.has(job.status) || (jobId != null && job.id !== jobId),
+    )
+  }
 
   function dispose() {
     unlisten?.()
@@ -98,7 +101,7 @@ export const useAnalysisQueueStore = defineStore('analysisQueue', () => {
   }
 
   return {
-    jobs, clock, tasks, currentTask, pendingCount, totalCount, doneCount, hasAny, isIdle,
+    jobs, clock, tasks, pendingCount, totalCount, doneCount, hasAny, isIdle,
     progressPercent, initialize, startAnalysis, startSync, cancel, retry, clear, dispose,
   }
 })

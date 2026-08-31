@@ -6,8 +6,11 @@ mod path_local;
 mod sidecar;
 mod storage;
 
-use std::sync::{Arc, RwLock};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, RwLock};
 use tauri::Manager;
+use tokio::sync::Notify;
 
 use config::AppConfig;
 use sidecar::SidecarManager;
@@ -24,7 +27,93 @@ pub struct AppState {
     pub db: Arc<Database>,
     pub config: Arc<RwLock<AppConfig>>,
     pub sidecar: Option<Arc<SidecarManager>>,
-    pub job_lock: Arc<tokio::sync::Mutex<()>>,
+    pub job_lock: Arc<tokio::sync::RwLock<()>>,
+    pub analysis_runtime: Arc<AnalysisRuntime>,
+}
+
+pub struct AnalysisRuntime {
+    limit: AtomicUsize,
+    active: Mutex<usize>,
+    notify: Notify,
+    workers: Mutex<HashMap<String, HashMap<String, Arc<SidecarManager>>>>,
+}
+
+pub struct AnalysisPermit {
+    runtime: Arc<AnalysisRuntime>,
+}
+
+impl AnalysisRuntime {
+    pub fn new(limit: usize) -> Self {
+        Self {
+            limit: AtomicUsize::new(limit),
+            active: Mutex::new(0),
+            notify: Notify::new(),
+            workers: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub fn set_limit(&self, limit: usize) {
+        self.limit.store(limit, Ordering::Release);
+        self.notify.notify_waiters();
+    }
+
+    pub async fn acquire(self: &Arc<Self>) -> AnalysisPermit {
+        loop {
+            let notified = self.notify.notified();
+            {
+                let mut active = self.active.lock().expect("analysis active lock poisoned");
+                if *active < self.limit.load(Ordering::Acquire) {
+                    *active += 1;
+                    return AnalysisPermit {
+                        runtime: self.clone(),
+                    };
+                }
+            }
+            notified.await;
+        }
+    }
+
+    pub fn register_worker(&self, job_id: &str, item_id: &str, worker: Arc<SidecarManager>) {
+        self.workers
+            .lock()
+            .expect("analysis workers lock poisoned")
+            .entry(job_id.to_string())
+            .or_default()
+            .insert(item_id.to_string(), worker);
+    }
+
+    pub fn unregister_worker(&self, job_id: &str, item_id: &str) {
+        let mut workers = self.workers.lock().expect("analysis workers lock poisoned");
+        if let Some(items) = workers.get_mut(job_id) {
+            items.remove(item_id);
+            if items.is_empty() {
+                workers.remove(job_id);
+            }
+        }
+    }
+
+    pub fn stop_job(&self, job_id: &str) -> Result<(), String> {
+        let workers = self
+            .workers
+            .lock()
+            .map_err(|_| "分析任务锁异常，请重启应用".to_string())?
+            .get(job_id)
+            .map(|items| items.values().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        for worker in workers {
+            worker.cancel().map_err(|error| error.to_string())?;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for AnalysisPermit {
+    fn drop(&mut self) {
+        if let Ok(mut active) = self.runtime.active.lock() {
+            *active = active.saturating_sub(1);
+        }
+        self.runtime.notify.notify_one();
+    }
 }
 
 impl AppState {
@@ -73,11 +162,15 @@ pub fn run() {
         log::warn!("Sidecar 未就绪：提炼功能将不可用，直至构建或安装 chattake-sidecar");
     }
 
+    let analysis_runtime = Arc::new(AnalysisRuntime::new(
+        config.distiller.max_concurrent_analyses,
+    ));
     let state = AppState {
         db: Arc::new(db),
         config: Arc::new(RwLock::new(config)),
         sidecar,
-        job_lock: Arc::new(tokio::sync::Mutex::new(())),
+        job_lock: Arc::new(tokio::sync::RwLock::new(())),
+        analysis_runtime,
     };
 
     tauri::Builder::default()
@@ -94,6 +187,7 @@ pub fn run() {
                     state.config_snapshot(),
                     state.sidecar.clone(),
                     state.job_lock.clone(),
+                    state.analysis_runtime.clone(),
                     None,
                 ) {
                     log::error!("启动扫描任务创建失败: {}", error);
@@ -137,4 +231,27 @@ pub fn run() {
         ])
         .run(context)
         .expect("Tauri 应用启动失败");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn analysis_runtime_applies_limit_updates() {
+        let runtime = Arc::new(AnalysisRuntime::new(1));
+        let first = runtime.acquire().await;
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(20), runtime.acquire())
+                .await
+                .is_err()
+        );
+
+        runtime.set_limit(2);
+        let second = tokio::time::timeout(std::time::Duration::from_millis(100), runtime.acquire())
+            .await
+            .expect("提高并发上限后应立即获得许可");
+
+        drop((first, second));
+    }
 }
