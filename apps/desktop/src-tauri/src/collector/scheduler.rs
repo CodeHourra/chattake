@@ -14,17 +14,18 @@
 //!   SyncResult { found, new, updated, skipped }
 //! ```
 
+use rusqlite::{params, OptionalExtension, Transaction};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 use crate::config::AppConfig;
-use crate::storage::models::NewMessage;
 use crate::storage::Database;
 
+use super::agent_jsonl::AgentJsonlCollector;
 use super::claude_code::ClaudeCodeCollector;
 use super::codebuddy::CodeBuddyCollector;
+use super::codex::CodexCollector;
 use super::cursor::CursorCollector;
-use super::normalizer::NormalizedSession;
+use super::normalizer::{CollectionBatch, NormalizedSession};
 
 /// 同步结果统计
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -38,6 +39,7 @@ pub struct SyncResult {
     pub updated: u32,
     /// 无变化跳过的会话数
     pub skipped: u32,
+    pub failed: u32,
 }
 
 /// 采集调度器，持有配置和数据库引用
@@ -51,70 +53,90 @@ impl<'a> CollectorScheduler<'a> {
         Self { config, db }
     }
 
-    /// 执行全量采集：遍历所有启用的数据源，采集 → 去重 → 写入
-    pub fn collect_all(&self) -> SyncResult {
-        let mut total_result = SyncResult::default();
-
-        let enabled_ids: Vec<&str> = self
+    pub fn collect_source_with_progress(
+        &self,
+        source_id: &str,
+        mut on_file: impl FnMut(&str, &str, Option<&str>),
+    ) -> SyncResult {
+        let Some(source) = self
             .config
             .enabled_sources()
-            .iter()
-            .map(|s| s.id.as_str())
-            .collect();
-        log::info!(
-            "本次同步将采集的数据源 id 列表（仅已启用）: {:?}；未在列表中的数据源不会扫描",
-            enabled_ids
-        );
-
-        for source in self.config.enabled_sources() {
-            log::info!("开始采集数据源: {} ({})", source.name, source.id);
-            let scan_dirs = source.resolved_scan_dirs();
-
-            let sessions: Vec<NormalizedSession> = match source.id.as_str() {
-                "claude-code" => {
-                    let collector = ClaudeCodeCollector::new(scan_dirs);
-                    collector.collect()
-                }
-                "cursor" => {
-                    let collector = CursorCollector::new(scan_dirs);
-                    collector.collect()
-                }
-                "codebuddy-cli" => {
-                    let collector = CodeBuddyCollector::new(scan_dirs);
-                    collector.collect()
-                }
-                other => {
-                    log::warn!("未知数据源类型: {}", other);
-                    continue;
-                }
-            };
-
-            // 去重写入，并累计 sync_log
-            let source_result = self.dedup_and_write(&source.id, &sessions);
-            log::info!(
-                "数据源 {} 采集完成: 发现={}, 新增={}, 更新={}, 跳过={}",
-                source.name, source_result.found, source_result.new,
-                source_result.updated, source_result.skipped
-            );
-
-            // 记录 sync_log
-            if let Err(e) = self.write_sync_log(&source.id, &source_result) {
-                log::error!("写入同步日志失败: {}", e);
+            .into_iter()
+            .find(|source| source.id == source_id)
+        else {
+            return SyncResult::default();
+        };
+        log::info!("开始采集数据源: {} ({})", source.name, source.id);
+        let scan_dirs = source.resolved_scan_dirs();
+        let batch: CollectionBatch = match source.id.as_str() {
+            "claude-code" => {
+                let collector = ClaudeCodeCollector::new(scan_dirs);
+                collector.collect_changed(|path, mtime, size| {
+                    self.db
+                        .source_file_unchanged(&source.id, path, mtime, size)
+                        .unwrap_or(false)
+                })
             }
+            "cursor" => {
+                let collector = CursorCollector::new(scan_dirs);
+                collector.collect_changed(|path, mtime, size| {
+                    self.db
+                        .source_file_unchanged(&source.id, path, mtime, size)
+                        .unwrap_or(false)
+                })
+            }
+            "codebuddy" => {
+                let collector = CodeBuddyCollector::new(scan_dirs);
+                collector.collect_changed(|path, mtime, size| {
+                    self.db
+                        .source_file_unchanged(&source.id, path, mtime, size)
+                        .unwrap_or(false)
+                })
+            }
+            "codex" => {
+                let collector = CodexCollector::new(scan_dirs);
+                collector.collect_changed(|path, mtime, size| {
+                    self.db
+                        .source_file_unchanged(&source.id, path, mtime, size)
+                        .unwrap_or(false)
+                })
+            }
+            "omp" | "pi" => {
+                let collector = AgentJsonlCollector::new(
+                    if source.id == "omp" { "omp" } else { "pi" },
+                    scan_dirs,
+                );
+                collector.collect_changed(|path, mtime, size| {
+                    self.db
+                        .source_file_unchanged(&source.id, path, mtime, size)
+                        .unwrap_or(false)
+                })
+            }
+            other => {
+                log::warn!("未知数据源类型: {}", other);
+                return SyncResult::default();
+            }
+        };
 
-            total_result.found += source_result.found;
-            total_result.new += source_result.new;
-            total_result.updated += source_result.updated;
-            total_result.skipped += source_result.skipped;
+        for path in &batch.skipped_paths {
+            on_file(path, "skipped", None);
         }
-
+        for failure in &batch.failures {
+            on_file(&failure.raw_path, "failed", Some(&failure.error));
+        }
+        let mut result = self.dedup_and_write(&batch.sessions, &mut on_file);
+        result.found = batch.found;
+        result.skipped += batch.skipped;
+        result.failed += batch.failures.len() as u32;
         log::info!(
-            "全量采集完成: 发现={}, 新增={}, 更新={}, 跳过={}",
-            total_result.found, total_result.new,
-            total_result.updated, total_result.skipped
+            "数据源 {} 采集完成: 发现={}, 新增={}, 更新={}, 跳过={}",
+            source.name,
+            result.found,
+            result.new,
+            result.updated,
+            result.skipped
         );
-
-        total_result
+        result
     }
 
     /// 对采集到的会话逐条去重写入。
@@ -123,23 +145,35 @@ impl<'a> CollectorScheduler<'a> {
     /// - session_id + source_host 不存在 → INSERT（新增）
     /// - 存在 + message_count 增加    → 标记 has_updates（更新）
     /// - 存在 + message_count 不变    → SKIP（跳过）
-    fn dedup_and_write(&self, _source_id: &str, sessions: &[NormalizedSession]) -> SyncResult {
-        let mut result = SyncResult {
-            found: sessions.len() as u32,
-            ..Default::default()
-        };
+    fn dedup_and_write(
+        &self,
+        sessions: &[NormalizedSession],
+        on_file: &mut impl FnMut(&str, &str, Option<&str>),
+    ) -> SyncResult {
+        let mut result = SyncResult::default();
 
         for session in sessions {
             match self.write_one_session(session) {
-                Ok(WriteAction::New) => result.new += 1,
-                Ok(WriteAction::Updated) => result.updated += 1,
-                Ok(WriteAction::Skipped) => result.skipped += 1,
+                Ok(WriteAction::New) => {
+                    result.new += 1;
+                    on_file(&session.raw_path, "imported", None);
+                }
+                Ok(WriteAction::Updated) => {
+                    result.updated += 1;
+                    on_file(&session.raw_path, "updated", None);
+                }
+                Ok(WriteAction::Skipped) => {
+                    result.skipped += 1;
+                    on_file(&session.raw_path, "skipped", None);
+                }
                 Err(e) => {
                     log::error!(
                         "写入会话失败: session_id={}, error={}",
-                        session.session_id, e
+                        session.session_id,
+                        e
                     );
-                    result.skipped += 1;
+                    result.failed += 1;
+                    on_file(&session.raw_path, "failed", Some(&e.to_string()));
                 }
             }
         }
@@ -154,96 +188,93 @@ impl<'a> CollectorScheduler<'a> {
     ) -> Result<WriteAction, Box<dyn std::error::Error>> {
         let source_host = "local";
         let message_count = session.messages.len() as i32;
+        let content_hash = session_content_hash(session);
+        let mut conn = self.db.conn();
+        let tx = conn.transaction()?;
+        let existing: Option<(String, Option<String>, i64)> = tx.query_row(
+            "SELECT id, content_hash, message_count FROM sessions WHERE source_id=?1 AND external_session_id=?2 AND source_host=?3",
+            params![session.source_id, session.session_id, source_host],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        ).optional()?;
 
-        // Step 1: 检查是否已存在
-        let existing_id = self.db.check_duplicate(&session.session_id, source_host)?;
-
-        // 将 NormalizedMessage 转换为存储层的 NewMessage
-        let to_new_messages = |session: &NormalizedSession| -> Vec<NewMessage> {
-            session.messages.iter().map(|m| NewMessage {
-                role: m.role.clone(),
-                content: m.content.clone(),
-                timestamp: m.timestamp.clone(),
-                tokens_in: m.tokens_in as i32,
-                tokens_out: m.tokens_out as i32,
-            }).collect()
-        };
-
-        match existing_id {
+        let action = match existing {
             None => {
-                // 新会话 → 写入 session + messages
-                let db_id = self.db.insert_session(
-                    &session.source_id,
-                    &session.session_id,
-                    source_host,
-                    session.project_path.as_deref(),
-                    session.project_name.as_deref(),
-                    message_count,
-                    None, // content_hash（v0.1 暂不计算）
-                    &session.raw_path,
-                    &session.created_at,
-                    &session.updated_at,
-                    session.analysis_title.as_deref(),
+                let id = uuid::Uuid::new_v4().to_string();
+                tx.execute(
+                    "INSERT INTO sessions (id,source_id,external_session_id,source_host,project_path,project_name,message_count,content_hash,raw_path,raw_mtime_ms,raw_size_bytes,created_at,updated_at,analysis_title)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+                    params![id, session.source_id, session.session_id, source_host, session.project_path,
+                        session.project_name, message_count, content_hash, session.raw_path,
+                        session.raw_mtime_ms, session.raw_size_bytes, session.created_at,
+                        session.updated_at, session.analysis_title],
                 )?;
-
-                self.db.insert_messages(&db_id, &to_new_messages(session))?;
-                Ok(WriteAction::New)
+                insert_messages_tx(&tx, &id, session)?;
+                WriteAction::New
             }
-            Some(existing_db_id) => {
-                // 已存在 → 检查 message_count 是否变化
-                let existing_session = self.db.get_session(&existing_db_id)?;
-
-                if message_count as i64 > existing_session.message_count {
-                    // 有新消息 → 删除旧消息并重新全量导入，保证数据一致性
-                    self.db.delete_session_messages(&existing_db_id)?;
-                    self.db.insert_messages(&existing_db_id, &to_new_messages(session))?;
-                    self.db.mark_has_updates(&existing_db_id)?;
-                    self.db.update_session_resync_metadata(
-                        &existing_db_id,
-                        message_count,
-                        session.project_path.as_deref(),
-                        session.project_name.as_deref(),
-                        session.analysis_title.as_deref(),
+            Some((id, old_hash, old_count)) => {
+                if old_hash.as_deref() == Some(&content_hash) {
+                    tx.execute(
+                        "UPDATE sessions SET raw_mtime_ms=?1,raw_size_bytes=?2,updated_at=?3 WHERE id=?4",
+                        params![session.raw_mtime_ms, session.raw_size_bytes, session.updated_at, id],
+                    )?;
+                    WriteAction::Skipped
+                } else {
+                    tx.execute("DELETE FROM messages WHERE session_id=?1", params![id])?;
+                    insert_messages_tx(&tx, &id, session)?;
+                    tx.execute(
+                        "UPDATE sessions SET message_count=?1,content_hash=?2,raw_path=?3,raw_mtime_ms=?4,raw_size_bytes=?5,
+                         project_path=?6,project_name=?7,analysis_title=COALESCE(?8,analysis_title),updated_at=?9,has_updates=1 WHERE id=?10",
+                        params![message_count, content_hash, session.raw_path, session.raw_mtime_ms,
+                            session.raw_size_bytes, session.project_path, session.project_name,
+                            session.analysis_title, session.updated_at, id],
                     )?;
                     log::info!(
                         "会话消息已更新: session_id={}, {} → {} 条消息",
                         session.session_id,
-                        existing_session.message_count,
+                        old_count,
                         message_count
                     );
-                    Ok(WriteAction::Updated)
-                } else {
-                    Ok(WriteAction::Skipped)
+                    WriteAction::Updated
                 }
             }
-        }
-    }
-
-    /// 写入同步日志
-    fn write_sync_log(
-        &self,
-        source_id: &str,
-        result: &SyncResult,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let id = Uuid::new_v4().to_string();
-        let now = chrono::Utc::now().to_rfc3339();
-        let conn = self.db.conn();
-        conn.execute(
-            "INSERT INTO sync_log (
-                id, source_id, started_at, finished_at,
-                sessions_found, sessions_new, sessions_updated, status
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            rusqlite::params![
-                id, source_id, now, now,
-                result.found as i64, result.new as i64, result.updated as i64,
-                "completed"
-            ],
-        )?;
-        Ok(())
+        };
+        tx.commit()?;
+        Ok(action)
     }
 }
 
+fn insert_messages_tx(
+    tx: &Transaction<'_>,
+    session_id: &str,
+    session: &NormalizedSession,
+) -> rusqlite::Result<()> {
+    for (seq, message) in session.messages.iter().enumerate() {
+        tx.execute(
+            "INSERT INTO messages(id,session_id,role,content,timestamp,tokens_in,tokens_out,seq_order) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
+            params![uuid::Uuid::new_v4().to_string(), session_id, message.role, message.content,
+                message.timestamp, message.tokens_in, message.tokens_out, seq as i64],
+        )?;
+    }
+    Ok(())
+}
+
+fn session_content_hash(session: &NormalizedSession) -> String {
+    let mut context = md5::Context::new();
+    for message in &session.messages {
+        context.consume(message.role.as_bytes());
+        context.consume([0]);
+        context.consume(message.content.as_bytes());
+        context.consume([0]);
+        if let Some(timestamp) = &message.timestamp {
+            context.consume(timestamp.as_bytes());
+        }
+        context.consume([0xff]);
+    }
+    format!("{:x}", context.compute())
+}
+
 /// 去重写入的动作结果
+#[derive(Debug, PartialEq, Eq)]
 enum WriteAction {
     /// 新会话，已写入
     New,
@@ -251,4 +282,73 @@ enum WriteAction {
     Updated,
     /// 已存在且无变化，跳过
     Skipped,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::collector::normalizer::NormalizedMessage;
+
+    fn session(contents: &[&str], size: i64) -> NormalizedSession {
+        NormalizedSession {
+            source_id: "codex".into(),
+            session_id: "same-id".into(),
+            project_path: Some("/tmp/project".into()),
+            project_name: Some("project".into()),
+            analysis_title: None,
+            messages: contents
+                .iter()
+                .enumerate()
+                .map(|(index, content)| NormalizedMessage {
+                    role: if index % 2 == 0 {
+                        "user".into()
+                    } else {
+                        "assistant".into()
+                    },
+                    content: (*content).into(),
+                    timestamp: None,
+                    tokens_in: 0,
+                    tokens_out: 0,
+                })
+                .collect(),
+            raw_path: "/tmp/codex.jsonl".into(),
+            raw_mtime_ms: Some(size),
+            raw_size_bytes: Some(size),
+            created_at: "2026-08-30T00:00:00Z".into(),
+            updated_at: "2026-08-30T00:00:01Z".into(),
+        }
+    }
+
+    #[test]
+    fn detects_same_count_edits_and_message_removal() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open(&dir.path().join("test.db")).unwrap();
+        let config = AppConfig::default();
+        let scheduler = CollectorScheduler::new(&config, &db);
+
+        assert_eq!(
+            scheduler
+                .write_one_session(&session(&["a", "b"], 1))
+                .unwrap(),
+            WriteAction::New
+        );
+        assert_eq!(
+            scheduler
+                .write_one_session(&session(&["a", "changed"], 2))
+                .unwrap(),
+            WriteAction::Updated
+        );
+        let id = db
+            .check_duplicate("codex", "same-id", "local")
+            .unwrap()
+            .unwrap();
+        assert_eq!(db.get_session_messages(&id).unwrap()[1].content, "changed");
+
+        assert_eq!(
+            scheduler.write_one_session(&session(&["a"], 3)).unwrap(),
+            WriteAction::Updated
+        );
+        assert_eq!(db.get_session(&id).unwrap().message_count, 1);
+        assert_eq!(db.get_session_messages(&id).unwrap().len(), 1);
+    }
 }

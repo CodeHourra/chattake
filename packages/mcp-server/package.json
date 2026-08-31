@@ -1,13 +1,15 @@
 {
-  "name": "@xunji/mcp-server",
-  "version": "0.1.3",
+  "name": "@chattake/mcp-server",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "bun run src/index.ts",
-    "build": "bun build src/index.ts --compile --outfile dist/xunji-mcp"
+    "build": "bun build src/index.ts --compile --outfile dist/chattake-mcp",
+    "test": "bun test"
   },
   "dependencies": {
-    "@xunji/shared": "workspace:*"
+    "@modelcontextprotocol/server": "^2.0.0",
+    "zod": "^4.5.4"
   }
 }

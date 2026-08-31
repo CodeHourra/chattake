@@ -21,7 +21,10 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
-use super::normalizer::{NormalizedMessage, NormalizedSession};
+use super::normalizer::{
+    file_fingerprint, normalize_user_content, CollectionBatch, CollectionFailure,
+    NormalizedMessage, NormalizedSession,
+};
 
 /// Claude Code 数据采集器
 pub struct ClaudeCodeCollector {
@@ -35,38 +38,63 @@ impl ClaudeCodeCollector {
     }
 
     /// 扫描所有配置的目录，返回解析后的标准化会话列表
+    #[cfg(test)]
     pub fn collect(&self) -> Vec<NormalizedSession> {
-        let mut sessions = Vec::new();
+        self.collect_changed(|_, _, _| false).sessions
+    }
+
+    pub fn collect_changed<F>(&self, unchanged: F) -> CollectionBatch
+    where
+        F: Fn(&Path, i64, i64) -> bool,
+    {
+        let mut batch = CollectionBatch::default();
 
         for dir in &self.scan_dirs {
             let projects_dir = dir.join("projects");
             if !projects_dir.exists() {
-                log::debug!("Claude Code projects 目录不存在，跳过: {}", projects_dir.display());
+                log::debug!(
+                    "Claude Code projects 目录不存在，跳过: {}",
+                    projects_dir.display()
+                );
                 continue;
             }
 
-            match self.scan_projects_dir(&projects_dir) {
+            match self.scan_projects_dir(&projects_dir, &unchanged) {
                 Ok(mut found) => {
                     log::info!(
                         "从 {} 扫描到 {} 个会话",
                         projects_dir.display(),
-                        found.len()
+                        found.sessions.len()
                     );
-                    sessions.append(&mut found);
+                    batch.sessions.append(&mut found.sessions);
+                    batch.failures.append(&mut found.failures);
+                    batch.skipped_paths.append(&mut found.skipped_paths);
+                    batch.found += found.found;
+                    batch.skipped += found.skipped;
                 }
                 Err(e) => {
-                    log::error!("扫描 Claude Code 目录失败: {} - {}", projects_dir.display(), e);
+                    batch.failures.push(CollectionFailure {
+                        raw_path: projects_dir.to_string_lossy().into_owned(),
+                        error: e.to_string(),
+                    });
                 }
             }
         }
 
-        log::info!("Claude Code 采集完成，共 {} 个会话", sessions.len());
-        sessions
+        log::info!("Claude Code 采集完成，共 {} 个会话", batch.sessions.len());
+        batch
     }
 
     /// 扫描 projects/ 下所有子目录中的 .jsonl 文件
-    fn scan_projects_dir(&self, projects_dir: &Path) -> Result<Vec<NormalizedSession>, std::io::Error> {
-        let mut sessions = Vec::new();
+    fn scan_projects_dir<F>(
+        &self,
+        projects_dir: &Path,
+        unchanged: &F,
+    ) -> Result<CollectionBatch, std::io::Error>
+    where
+        F: Fn(&Path, i64, i64) -> bool,
+    {
+        let mut batch = CollectionBatch::default();
 
         for entry in fs::read_dir(projects_dir)? {
             let entry = entry?;
@@ -75,7 +103,7 @@ impl ClaudeCodeCollector {
                 continue;
             }
 
-            // 目录名形如 "-Users-steve-Codes-myspace-ai-project-xunji"
+            // 目录名形如 "-Users-steve-Codes-myspace-ai-project-chattake"
             // 可以反推项目路径：将 - 替换为 /（首个 - 是分隔符）
             let dir_name = entry.file_name().to_string_lossy().to_string();
             let (project_path, project_name) = derive_project_info(&dir_name);
@@ -86,6 +114,18 @@ impl ClaudeCodeCollector {
 
                 // 只处理 .jsonl 文件
                 if file_path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                    continue;
+                }
+                batch.found += 1;
+                let (raw_mtime_ms, raw_size_bytes) = match file_fingerprint(&file_path) {
+                    Some(fingerprint) => fingerprint,
+                    None => continue,
+                };
+                if unchanged(&file_path, raw_mtime_ms, raw_size_bytes) {
+                    batch.skipped += 1;
+                    batch
+                        .skipped_paths
+                        .push(file_path.to_string_lossy().into_owned());
                     continue;
                 }
 
@@ -104,14 +144,16 @@ impl ClaudeCodeCollector {
                     Ok(parse_result) => {
                         if parse_result.messages.is_empty() {
                             log::debug!("会话无有效消息，跳过: {}", file_path.display());
+                            batch.skipped += 1;
+                            batch
+                                .skipped_paths
+                                .push(file_path.to_string_lossy().into_owned());
                             continue;
                         }
 
                         // 优先使用 JSONL 内的 cwd 作为项目路径
-                        let final_project_path = parse_result
-                            .cwd
-                            .clone()
-                            .or_else(|| project_path.clone());
+                        let final_project_path =
+                            parse_result.cwd.clone().or_else(|| project_path.clone());
                         let final_project_name = final_project_path
                             .as_ref()
                             .and_then(|p| Path::new(p).file_name())
@@ -128,7 +170,7 @@ impl ClaudeCodeCollector {
                             .clone()
                             .unwrap_or_else(|| created_at.clone());
 
-                        sessions.push(NormalizedSession {
+                        batch.sessions.push(NormalizedSession {
                             source_id: "claude-code".to_string(),
                             session_id,
                             project_path: final_project_path,
@@ -136,18 +178,23 @@ impl ClaudeCodeCollector {
                             analysis_title: None,
                             messages: parse_result.messages,
                             raw_path: file_path.to_string_lossy().to_string(),
+                            raw_mtime_ms: Some(raw_mtime_ms),
+                            raw_size_bytes: Some(raw_size_bytes),
                             created_at,
                             updated_at,
                         });
                     }
                     Err(e) => {
-                        log::warn!("解析 JSONL 文件失败: {} - {}", file_path.display(), e);
+                        batch.failures.push(CollectionFailure {
+                            raw_path: file_path.to_string_lossy().into_owned(),
+                            error: e.to_string(),
+                        });
                     }
                 }
             }
         }
 
-        Ok(sessions)
+        Ok(batch)
     }
 }
 
@@ -173,7 +220,8 @@ fn parse_jsonl(path: &Path) -> Result<ParseResult, Box<dyn std::error::Error>> {
     let mut first_timestamp: Option<String> = None;
     let mut last_timestamp: Option<String> = None;
 
-    for line in reader.lines() {
+    let mut lines = reader.lines().peekable();
+    while let Some(line) = lines.next() {
         let line = line?;
         if line.trim().is_empty() {
             continue;
@@ -181,10 +229,11 @@ fn parse_jsonl(path: &Path) -> Result<ParseResult, Box<dyn std::error::Error>> {
 
         let entry: serde_json::Value = match serde_json::from_str(&line) {
             Ok(v) => v,
-            Err(e) => {
-                log::trace!("跳过无法解析的行: {}", e);
+            Err(e) if lines.peek().is_none() => {
+                log::debug!("忽略活跃 Claude 会话末尾未完成行: {e}");
                 continue;
             }
+            Err(e) => return Err(format!("JSONL 中间行损坏: {e}").into()),
         };
 
         // 跳过子代理（sidechain）内的消息
@@ -205,21 +254,19 @@ fn parse_jsonl(path: &Path) -> Result<ParseResult, Box<dyn std::error::Error>> {
         }
 
         let message = &entry["message"];
+        let role = message["role"].as_str().unwrap_or(msg_type).to_string();
         let extracted = extract_content(message);
-        if extracted.text.trim().is_empty() {
+        let content = if role == "user" {
+            match normalize_user_content(&extracted) {
+                Some(content) => content,
+                None => continue,
+            }
+        } else {
+            extracted
+        };
+        if content.trim().is_empty() {
             continue;
         }
-
-        // 当 API 层 role 为 "user" 但内容全是 tool_result 时，标记为 "tool"
-        let role = if extracted.is_tool_result {
-            "tool".to_string()
-        } else {
-            message["role"]
-                .as_str()
-                .unwrap_or(msg_type)
-                .to_string()
-        };
-
         let timestamp = entry["timestamp"].as_str().map(String::from);
 
         // 记录首尾时间戳
@@ -237,7 +284,7 @@ fn parse_jsonl(path: &Path) -> Result<ParseResult, Box<dyn std::error::Error>> {
 
         messages.push(NormalizedMessage {
             role,
-            content: extracted.text,
+            content,
             timestamp,
             tokens_in,
             tokens_out,
@@ -252,102 +299,39 @@ fn parse_jsonl(path: &Path) -> Result<ParseResult, Box<dyn std::error::Error>> {
     })
 }
 
-/// extract_content 的返回值
-struct ExtractedContent {
-    /// 提取的文本内容
-    text: String,
-    /// 该消息内容是否全部由 tool_result 组成（无真正的用户输入）
-    is_tool_result: bool,
-}
-
 /// 从 message 对象中提取文本内容。
 ///
 /// Claude Code 的 content 有两种格式：
 /// - 纯字符串（user 消息常见）
 /// - 数组（assistant 消息常见）：[{type: "text", text: "..."}, {type: "tool_use", name: "...", input: {...}}, ...]
 ///
-/// 当 content 为数组且仅包含 tool_result 类型时，标记 is_tool_result = true，
-/// 调用方据此将 role 从 "user" 改为 "tool"。
-fn extract_content(message: &serde_json::Value) -> ExtractedContent {
+fn extract_content(message: &serde_json::Value) -> String {
     let content = &message["content"];
 
     match content {
-        serde_json::Value::String(s) => ExtractedContent {
-            text: s.clone(),
-            is_tool_result: false,
-        },
+        serde_json::Value::String(s) => s.clone(),
         serde_json::Value::Array(arr) => {
             let mut parts = Vec::new();
-            let mut has_text = false;
-            let mut has_tool_result = false;
 
             for item in arr {
-                match item["type"].as_str() {
-                    Some("text") => {
-                        if let Some(text) = item["text"].as_str() {
-                            if !text.trim().is_empty() {
-                                has_text = true;
-                                parts.push(text.to_string());
-                            }
+                if item["type"].as_str() == Some("text") {
+                    if let Some(text) = item["text"].as_str() {
+                        if !text.trim().is_empty() {
+                            parts.push(text.to_string());
                         }
                     }
-                    Some("tool_use") => {
-                        // 保留工具调用的摘要信息，供 LLM 分析时理解上下文
-                        let name = item["name"].as_str().unwrap_or("unknown");
-                        parts.push(format!("[Tool: {}]", name));
-                    }
-                    Some("tool_result") => {
-                        has_tool_result = true;
-                        // tool_result 可能包含嵌套 content
-                        if let Some(nested) = item["content"].as_str() {
-                            let preview = truncate_str(nested, 200);
-                            parts.push(format!("[Tool Result: {}]", preview));
-                        } else if let Some(nested_arr) = item["content"].as_array() {
-                            for nested_item in nested_arr {
-                                if nested_item["type"].as_str() == Some("text") {
-                                    if let Some(text) = nested_item["text"].as_str() {
-                                        let preview = truncate_str(text, 200);
-                                        parts.push(format!("[Tool Result: {}]", preview));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    _ => {}
                 }
             }
-
-            // 没有 text 块且有 tool_result → 整条消息是工具返回值
-            let is_tool_result = !has_text && has_tool_result;
-
-            ExtractedContent {
-                text: parts.join("\n\n"),
-                is_tool_result,
-            }
+            parts.join("\n\n")
         }
-        _ => ExtractedContent {
-            text: String::new(),
-            is_tool_result: false,
-        },
-    }
-}
-
-/// 截断字符串到指定字符数，返回不超过 max_chars 的前缀切片
-fn truncate_str(s: &str, max_chars: usize) -> &str {
-    if s.len() <= max_chars {
-        return s;
-    }
-    // 找到不超过 max_chars 的字符边界
-    match s.char_indices().nth(max_chars) {
-        Some((idx, _)) => &s[..idx],
-        None => s,
+        _ => String::new(),
     }
 }
 
 /// 从 Claude Code 的 projects 目录名反推项目路径和名称。
 ///
-/// 目录名格式: "-Users-steve-Codes-myspace-ai-project-xunji"
-/// 转换规则: 将 "-" 替换为 "/"，得到 "/Users/steve/Codes/myspace/ai-project/xunji"
+/// 目录名格式: "-Users-steve-Codes-myspace-ai-project-chattake"
+/// 转换规则: 将 "-" 替换为 "/"，得到 "/Users/steve/Codes/myspace/ai-project/chattake"
 ///
 /// 注意：此推导不完全准确（路径中的 "-" 会被混淆），所以优先使用 JSONL 内的 cwd 字段。
 fn derive_project_info(dir_name: &str) -> (Option<String>, Option<String>) {
@@ -378,8 +362,7 @@ mod tests {
             "content": "Hello, world!"
         });
         let result = extract_content(&msg);
-        assert_eq!(result.text, "Hello, world!");
-        assert!(!result.is_tool_result);
+        assert_eq!(result, "Hello, world!");
     }
 
     #[test]
@@ -391,8 +374,7 @@ mod tests {
             ]
         });
         let result = extract_content(&msg);
-        assert_eq!(result.text, "First paragraph\n\nSecond paragraph");
-        assert!(!result.is_tool_result);
+        assert_eq!(result, "First paragraph\n\nSecond paragraph");
     }
 
     #[test]
@@ -404,9 +386,7 @@ mod tests {
             ]
         });
         let result = extract_content(&msg);
-        assert!(result.text.contains("Let me read the file."));
-        assert!(result.text.contains("[Tool: Read]"));
-        assert!(!result.is_tool_result, "有 text 块时不应标记为 tool_result");
+        assert_eq!(result, "Let me read the file.");
     }
 
     #[test]
@@ -417,23 +397,24 @@ mod tests {
             ]
         });
         let result = extract_content(&msg);
-        assert!(result.text.contains("[Tool Result:"));
-        assert!(result.is_tool_result, "纯 tool_result 内容应标记为 is_tool_result");
+        assert!(result.is_empty());
     }
 
     #[test]
     fn test_extract_content_empty() {
         let msg = serde_json::json!({});
         let result = extract_content(&msg);
-        assert_eq!(result.text, "");
-        assert!(!result.is_tool_result);
+        assert_eq!(result, "");
     }
 
     #[test]
     fn test_derive_project_info() {
-        let (path, name) = derive_project_info("-Users-steve-Codes-myspace-ai-project-xunji");
-        assert_eq!(path, Some("/Users/steve/Codes/myspace/ai/project/xunji".to_string()));
-        assert_eq!(name, Some("xunji".to_string()));
+        let (path, name) = derive_project_info("-Users-steve-Codes-myspace-ai-project-chattake");
+        assert_eq!(
+            path,
+            Some("/Users/steve/Codes/myspace/ai/project/chattake".to_string())
+        );
+        assert_eq!(name, Some("chattake".to_string()));
     }
 
     #[test]
@@ -465,15 +446,33 @@ mod tests {
         assert_eq!(result.messages[1].tokens_in, 100);
         assert_eq!(result.messages[1].tokens_out, 50);
         assert_eq!(result.cwd, Some("/Users/steve/project".to_string()));
-        assert_eq!(result.first_timestamp, Some("2026-03-20T05:30:00.000Z".to_string()));
-        assert_eq!(result.last_timestamp, Some("2026-03-20T05:30:05.000Z".to_string()));
+        assert_eq!(
+            result.first_timestamp,
+            Some("2026-03-20T05:30:00.000Z".to_string())
+        );
+        assert_eq!(
+            result.last_timestamp,
+            Some("2026-03-20T05:30:05.000Z".to_string())
+        );
     }
 
     #[test]
-    fn test_truncate_str() {
-        assert_eq!(truncate_str("hello", 10), "hello");
-        assert_eq!(truncate_str("hello world", 5), "hello");
-        assert_eq!(truncate_str("你好世界", 2), "你好");
+    fn test_parse_jsonl_keeps_slash_command_and_args() {
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("command.jsonl");
+        let content = "<command-name>/understand-anything:understand</command-name>\n<command-message>duplicate</command-message>\n<command-args>--language zh</command-args>";
+        fs::write(
+            &file_path,
+            serde_json::json!({"type":"user","message":{"role":"user","content":content}})
+                .to_string(),
+        )
+        .unwrap();
+
+        let result = parse_jsonl(&file_path).unwrap();
+        assert_eq!(
+            result.messages[0].content,
+            "/understand-anything:understand --language zh"
+        );
     }
 
     /// 使用本地真实 Claude Code 数据验证采集器（需要 --ignored 才会运行）
@@ -481,10 +480,7 @@ mod tests {
     #[ignore]
     fn test_real_local_data() {
         let home = dirs::home_dir().unwrap();
-        let collector = ClaudeCodeCollector::new(vec![
-            home.join(".claude"),
-            home.join(".claude-internal"),
-        ]);
+        let collector = ClaudeCodeCollector::new(vec![home.join(".claude")]);
 
         let sessions = collector.collect();
         println!("\n=== Claude Code 采集结果 ===");

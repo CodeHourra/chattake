@@ -1,12 +1,12 @@
 {
-  "name": "@xunji/desktop",
+  "name": "@chattake/desktop",
   "private": true,
-  "version": "0.1.6",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc --noEmit && vite build",
-    "build:tauri": "cd ../.. && npm run sync:changelog && cd packages/sidecar && bun run build && cd ../../apps/desktop && vue-tsc --noEmit && vite build",
+    "build:tauri": "cd ../.. && bun run sync:changelog && bun run build:companions && bun run --cwd apps/desktop build",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:build": "env -u CI tauri build"
@@ -17,7 +17,7 @@
     "@tauri-apps/plugin-process": "^2",
     "@tauri-apps/plugin-updater": "^2",
     "@vueuse/core": "^14.2.1",
-    "@xunji/shared": "workspace:*",
+    "@chattake/shared": "workspace:*",
     "highlight.js": "^11.11.1",
     "marked": "^15.0.7",
     "naive-ui": "^2.44.1",

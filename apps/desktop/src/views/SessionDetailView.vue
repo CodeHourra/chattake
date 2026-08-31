@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
-import { NButton, NResult, NSpin, NTag, NTooltip, useMessage } from 'naive-ui'
+import { NButton, NInput, NModal, NResult, NSelect, NSpin, NTag, NTooltip, useDialog, useMessage } from 'naive-ui'
 import NoteCard from '../components/NoteCard.vue'
 import ChatReplay from '../components/ChatReplay.vue'
 import { useAnalysisQueueStore } from '../stores/analysisQueue'
@@ -18,18 +18,29 @@ const props = defineProps<{
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
+const dialog = useDialog()
 
 const queue = useAnalysisQueueStore()
 const { currentTask, tasks } = storeToRefs(queue)
 
 const session = ref<Session | null>(null)
 const messages = ref<Message[]>([])
+const nextCursor = ref<number | null>(null)
+const loadingMore = ref(false)
 const card = ref<Card | null>(null)
 const loading = ref(true)
 const analyzeError = ref<string | null>(null)
 const loadError = ref<string | null>(null)
 const exportMdLoading = ref(false)
 const mode = ref<'note' | 'chat'>('note')
+const editOpen = ref(false)
+const editSaving = ref(false)
+const edit = ref({ title: '', cardType: 'explanation', summary: '', note: '', tags: '', technologies: '' })
+const typeOptions = [
+  { label: '决策', value: 'decision' }, { label: '排障', value: 'troubleshooting' },
+  { label: '实现', value: 'implementation' }, { label: '解释', value: 'explanation' },
+  { label: '片段', value: 'snippet' },
+]
 
 /** 当前会话是否正在执行 distill（队列头） */
 const analyzing = computed(
@@ -52,12 +63,13 @@ async function load() {
   loading.value = true
   loadError.value = null
   try {
-    const [sess, msgs] = await Promise.all([
+    const [sess, page] = await Promise.all([
       api.getSession(props.sessionId),
       api.getSessionMessages(props.sessionId),
     ])
     session.value = sess
-    messages.value = msgs
+    messages.value = page.items
+    nextCursor.value = page.nextCursor
 
     const cardId = typeof route.query.cardId === 'string' ? route.query.cardId : null
     if (cardId) {
@@ -73,6 +85,16 @@ async function load() {
   }
 }
 
+async function loadMoreMessages() {
+  if (nextCursor.value == null) return
+  loadingMore.value = true
+  try {
+    const page = await api.getSessionMessages(props.sessionId, nextCursor.value)
+    messages.value.push(...page.items)
+    nextCursor.value = page.nextCursor
+  } finally { loadingMore.value = false }
+}
+
 onMounted(load)
 watch(() => [props.sessionId, route.query.cardId], () => {
   void load()
@@ -81,6 +103,10 @@ watch(() => [props.sessionId, route.query.cardId], () => {
 // ────────────── 操作 ──────────────
 
 function close() {
+  if (router.options.history.state.back) {
+    router.back()
+    return
+  }
   void router.push({ name: 'sessions' })
 }
 
@@ -97,42 +123,64 @@ async function onExportMarkdown() {
   }
 }
 
-function analyze() {
+async function analyze() {
   analyzeError.value = null
   if (session.value) session.value.status = 'analyzing'
-  const title =
-    session.value?.analysisTitle
-    ?? session.value?.projectName
-    ?? session.value?.projectPath
-    ?? props.sessionId
-  queue.enqueue(props.sessionId, title, {
-    onLowValue: (result) => {
-      if (session.value) {
-        session.value.status = 'analyzed'
-        session.value.value = result.value
-      }
-      card.value = null
-      analyzeError.value = `已判断为${result.value === 'none' ? '无价值' : '低价值'}：${result.reason ?? ''}`
-      void router.replace({
-        name: 'session-detail',
-        params: { sessionId: props.sessionId },
-      })
-    },
-    onSuccess: (result) => {
-      card.value = result.card
-      mode.value = 'note'
-      if (session.value) {
-        session.value.status = 'analyzed'
-        session.value.value = result.value
-      }
-      void router.replace({
-        name: 'session-detail',
-        params: { sessionId: props.sessionId },
-        query: result.card ? { cardId: result.card.id } : {},
-      })
-    },
-    onError: (msg) => {
-      analyzeError.value = appendDistillHint(msg)
+  try {
+    await queue.startAnalysis([props.sessionId])
+    analyzeError.value = '分析任务已创建；完成后可从对话列表打开生成的知识项。'
+  } catch (error) {
+    analyzeError.value = appendDistillHint(error instanceof Error ? error.message : String(error))
+    if (session.value) session.value.status = 'error'
+  }
+}
+
+function openEdit() {
+  if (!card.value) return
+  edit.value = {
+    title: card.value.title,
+    cardType: card.value.type ?? 'explanation',
+    summary: card.value.summary ?? '',
+    note: card.value.note,
+    tags: card.value.tags.join('，'),
+    technologies: card.value.techStack.join('，'),
+  }
+  editOpen.value = true
+}
+
+function splitLabels(value: string) {
+  return value.split(/[,，]/).map((item) => item.trim()).filter(Boolean)
+}
+
+async function saveEdit() {
+  if (!card.value) return
+  editSaving.value = true
+  try {
+    card.value = await api.updateCard(card.value.id, {
+      title: edit.value.title,
+      cardType: edit.value.cardType,
+      summary: edit.value.summary,
+      note: edit.value.note,
+      tags: splitLabels(edit.value.tags),
+      technologies: splitLabels(edit.value.technologies),
+    })
+    editOpen.value = false
+    message.success('草稿已保存')
+  } catch (error) {
+    message.error(error instanceof Error ? error.message : String(error))
+  } finally { editSaving.value = false }
+}
+
+function publish(replaceExisting: boolean) {
+  if (!card.value) return
+  const label = replaceExisting ? '替换同会话中未人工编辑的旧知识' : '与现有知识并存'
+  dialog.warning({
+    title: '发布草稿', content: `将发布此草稿，并${label}。人工编辑过的旧知识不会被自动删除。`,
+    positiveText: '确认发布', negativeText: '取消',
+    onPositiveClick: async () => {
+      if (!card.value) return
+      card.value = await api.publishCard(card.value.id, replaceExisting)
+      message.success('知识已发布')
     },
   })
 }
@@ -141,9 +189,14 @@ function analyze() {
 
 const sourceIcon = computed(() => {
   if (!session.value) return 'i-lucide-message-square'
-  if (session.value.sourceId === 'claude-code') return 'i-lucide-bot'
-  if (session.value.sourceId === 'cursor') return 'i-lucide-terminal-square'
-  return 'i-lucide-message-square'
+  return {
+    'claude-code': 'i-lucide-terminal',
+    codex: 'i-lucide-code-2',
+    cursor: 'i-lucide-mouse-pointer-click',
+    omp: 'i-lucide-orbit',
+    pi: 'i-lucide-circle-dot',
+    codebuddy: 'i-lucide-code',
+  }[session.value.sourceId] ?? 'i-lucide-message-square'
 })
 
 const statusTagType = computed<'default' | 'info' | 'success' | 'error'>(() => {
@@ -175,15 +228,15 @@ const statusLabel = computed(() => {
 })
 
 const valueColors: Record<string, string> = {
-  high: '#10b981',
-  medium: '#f59e0b',
-  low: '#94a3b8',
+  high: '#31594f',
+  medium: '#9f4526',
+  low: '#5d615b',
 }
 </script>
 
 <template>
-  <div class="flex flex-col h-full">
-    <div class="shrink-0 border-b border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 px-5 py-3">
+  <div class="detail-page flex flex-col h-full">
+    <div class="detail-header shrink-0 border-b px-5 py-3">
       <div class="max-w-4xl mx-auto flex items-start gap-4">
         <n-button text size="small" class="mt-0.5 shrink-0" @click="close">
           <span class="inline-flex items-center gap-1 text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200">
@@ -262,7 +315,7 @@ const valueColors: Record<string, string> = {
       </div>
     </div>
 
-    <div class="flex-1 min-h-0 overflow-y-auto">
+    <div class="detail-scroll flex-1 min-h-0 overflow-y-auto">
       <div class="max-w-4xl mx-auto px-5 py-5">
         <div v-if="loading" class="flex items-center justify-center py-20">
           <n-spin size="medium" />
@@ -276,6 +329,21 @@ const valueColors: Record<string, string> = {
         </n-result>
 
         <template v-else-if="card">
+          <div class="mb-3 flex items-center justify-between gap-3 rounded-xl border border-neutral-200 dark:border-neutral-800 px-3 py-2">
+            <div class="flex items-center gap-2 text-sm">
+              <n-tag size="small" :type="card.publicationStatus === 'draft' ? 'warning' : 'success'">
+                {{ card.publicationStatus === 'draft' ? '待审草稿' : '已发布' }}
+              </n-tag>
+              <span v-if="card.isUserEdited" class="text-xs text-neutral-500">已人工编辑</span>
+            </div>
+            <div class="flex gap-2">
+              <n-button size="small" secondary @click="openEdit">编辑</n-button>
+              <template v-if="card.publicationStatus === 'draft'">
+                <n-button size="small" secondary @click="publish(false)">发布并存</n-button>
+                <n-button size="small" type="primary" @click="publish(true)">发布并替换</n-button>
+              </template>
+            </div>
+          </div>
           <div
             v-if="analyzeQueued && !analyzing"
             class="mb-4 flex items-center gap-3 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-neutral-50 dark:bg-neutral-900/80 px-4 py-3"
@@ -321,9 +389,25 @@ const valueColors: Record<string, string> = {
             <template #chat>
               <div class="max-h-[520px] overflow-y-auto pr-1">
                 <ChatReplay :messages="messages" />
+                <n-button v-if="nextCursor != null" block secondary :loading="loadingMore" class="mt-3" @click="loadMoreMessages">加载后续 100 条</n-button>
               </div>
             </template>
           </NoteCard>
+
+          <n-modal v-model:show="editOpen" preset="card" title="编辑知识项" class="max-w-3xl" :mask-closable="false">
+            <div class="space-y-3">
+              <n-input v-model:value="edit.title" placeholder="标题" />
+              <n-select v-model:value="edit.cardType" :options="typeOptions" />
+              <n-input v-model:value="edit.summary" type="textarea" :rows="2" placeholder="摘要" />
+              <n-input v-model:value="edit.note" type="textarea" :rows="14" placeholder="Markdown 正文" />
+              <n-input v-model:value="edit.tags" placeholder="主题标签，逗号分隔，最多 3 个" />
+              <n-input v-model:value="edit.technologies" placeholder="技术项，逗号分隔，最多 5 个" />
+              <div class="flex justify-end gap-2">
+                <n-button @click="editOpen = false">取消</n-button>
+                <n-button type="primary" :loading="editSaving" @click="saveEdit">保存</n-button>
+              </div>
+            </div>
+          </n-modal>
         </template>
 
         <template v-else-if="session">
@@ -375,6 +459,7 @@ const valueColors: Record<string, string> = {
                 </n-tooltip>
               </div>
               <ChatReplay :messages="messages" />
+              <n-button v-if="nextCursor != null" block secondary :loading="loadingMore" class="mt-3" @click="loadMoreMessages">加载后续 100 条</n-button>
             </div>
           </div>
         </template>
@@ -382,3 +467,9 @@ const valueColors: Record<string, string> = {
     </div>
   </div>
 </template>
+
+<style scoped>
+.detail-page { color:var(--ink); background:var(--canvas); }
+.detail-header { border-color:var(--line); background:color-mix(in srgb,var(--surface) 84%,transparent); }
+.detail-scroll { background:var(--canvas); }
+</style>

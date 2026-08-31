@@ -10,10 +10,12 @@
 //! search.rs       FTS5 全文搜索
 //! ```
 
-pub mod db;
-pub mod models;
+mod analysis;
 mod cards;
+pub mod db;
+mod jobs;
 mod migrations;
+pub mod models;
 mod search;
 mod sessions;
 

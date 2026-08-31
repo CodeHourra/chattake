@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import {
   NTooltip,
   NButton,
@@ -10,16 +10,15 @@ import {
 import type { DropdownOption } from 'naive-ui'
 import { useRouter } from 'vue-router'
 import { useUiStore } from '../stores/ui'
-import { useSessionsStore } from '../stores/sessions'
-import { useSidebarStore } from '../stores/sidebar'
+import { useAnalysisQueueStore } from '../stores/analysisQueue'
 import { api } from '../lib/tauri'
 import { exportAllCardsToDir } from '../lib/cardExport'
-import SettingsModal from './SettingsModal.vue'
-import AppUpdateModal from './AppUpdateModal.vue'
+import AnalysisQueuePanel from './AnalysisQueuePanel.vue'
+const SettingsModal = defineAsyncComponent(() => import('./SettingsModal.vue'))
+const AppUpdateModal = defineAsyncComponent(() => import('./AppUpdateModal.vue'))
 
 const ui = useUiStore()
-const sessions = useSessionsStore()
-const sidebar = useSidebarStore()
+const queue = useAnalysisQueueStore()
 const router = useRouter()
 const message = useMessage()
 const dialog = useDialog()
@@ -27,6 +26,9 @@ const dialog = useDialog()
 const showSettings = ref(false)
 /** 独立「软件更新」弹窗（与设置解耦） */
 const showAppUpdate = ref(false)
+const showTaskCenter = ref(false)
+const syncing = computed(() => queue.jobs.some((job) => job.kind === 'sync' && ['queued', 'running'].includes(job.status)))
+const activeJob = computed(() => queue.jobs.find((job) => ['queued', 'running'].includes(job.status)))
 
 /** 顶栏「导出」下拉：与知识库页能力对齐 */
 const exportDropdownOptions: DropdownOption[] = [
@@ -75,12 +77,8 @@ function onTabChange(tab: 'sessions' | 'library') {
 
 async function onSync() {
   try {
-    const r = await sessions.syncAll()
-    void sidebar.loadSessionGroups()
-    message.success(
-      `同步完成：发现 ${r.found}，新增 ${r.new}，更新 ${r.updated}，跳过 ${r.skipped}`,
-      { duration: 5000 },
-    )
+    await queue.startSync()
+    message.success('同步任务已创建，可在进度中心查看文件级进度')
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e)
     message.error(msg, { duration: 12000, closable: true })
@@ -89,57 +87,48 @@ async function onSync() {
 </script>
 
 <template>
-  <header class="h-[60px] flex items-center justify-between px-4 border-b border-slate-200 dark:border-neutral-800 bg-white dark:bg-neutral-950 shrink-0 z-50">
+  <header class="top-bar glass-bar">
     <!-- 左侧：Logo + 分割线 + Tab 导航 -->
-    <div class="flex items-center gap-6">
+    <div class="top-bar-start">
       <!-- Logo 区域 -->
       <div class="flex items-center gap-3">
-        <div class="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-400 to-teal-600 flex items-center justify-center text-white">
-          <span class="i-lucide-footprints w-5 h-5" />
+        <div class="app-mark w-8 h-8 rounded-lg flex items-center justify-center">
+          <span class="i-lucide-book-open-check w-5 h-5" aria-hidden="true" />
         </div>
         <div class="flex flex-col">
-          <h1 class="font-bold text-[15px] leading-tight tracking-wide text-slate-800 dark:text-slate-100 flex items-center gap-1.5">
-            寻迹
-            <span class="px-1 py-0.5 rounded text-[9px] bg-emerald-100 dark:bg-emerald-900/60 text-emerald-700 dark:text-emerald-400 font-bold tracking-wider">BETA</span>
+          <h1 class="product-name">
+            有得
+            <span class="app-version px-1 py-0.5 rounded text-[9px] font-bold tracking-wider">0.2</span>
           </h1>
-          <span class="text-[10px] text-slate-500 dark:text-slate-400 font-medium leading-tight tracking-wide">AI 编程知识沉淀</span>
+          <span class="product-tagline">AI 对话知识库</span>
         </div>
       </div>
 
       <!-- 竖线分割 -->
-      <div class="w-px h-5 bg-slate-200 dark:bg-neutral-700 mx-1" />
+      <span class="top-divider" aria-hidden="true" />
 
-      <!-- Tab：design/ui_demo 扁平分段；segment-pill-btn 去掉 WebView 默认灰底 -->
-      <div class="flex items-center bg-slate-100/80 dark:bg-neutral-900/55 p-1 rounded-lg">
+      <nav class="top-nav" aria-label="主要页面">
         <button
           type="button"
-          class="segment-pill-btn"
-          :class="[
-            'flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer border-0 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35',
-            ui.activeTab === 'sessions'
-              ? 'bg-white dark:bg-neutral-800 text-emerald-600 dark:text-emerald-400 ring-1 ring-slate-200/90 dark:ring-white/10'
-              : 'bg-transparent text-slate-500 hover:text-slate-800 dark:text-neutral-500 dark:hover:text-neutral-200',
-          ]"
+          class="ui-tab top-nav-item"
+          :class="{ active: ui.activeTab === 'sessions' }"
+          :aria-current="ui.activeTab === 'sessions' ? 'page' : undefined"
           @click="onTabChange('sessions')"
         >
-          <span class="i-lucide-messages-square w-4 h-4" />
-          对话记录
+          <span class="i-lucide-messages-square top-nav-icon" aria-hidden="true" />
+          对话档案
         </button>
         <button
           type="button"
-          class="segment-pill-btn"
-          :class="[
-            'flex items-center gap-2 px-4 py-1.5 rounded-md text-sm font-medium transition-colors cursor-pointer border-0 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35',
-            ui.activeTab === 'library'
-              ? 'bg-white dark:bg-neutral-800 text-emerald-600 dark:text-emerald-400 ring-1 ring-slate-200/90 dark:ring-white/10'
-              : 'bg-transparent text-slate-500 hover:text-slate-800 dark:text-neutral-500 dark:hover:text-neutral-200',
-          ]"
+          class="ui-tab top-nav-item"
+          :class="{ active: ui.activeTab === 'library' }"
+          :aria-current="ui.activeTab === 'library' ? 'page' : undefined"
           @click="onTabChange('library')"
         >
-          <span class="i-lucide-library w-4 h-4" />
-          知识库
+          <span class="i-lucide-library top-nav-icon" aria-hidden="true" />
+          知识笔记
         </button>
-      </div>
+      </nav>
     </div>
 
     <!-- 右侧：同步 + 工具按钮 -->
@@ -147,18 +136,32 @@ async function onSync() {
       <n-button
         size="small"
         secondary
-        class="rounded-md"
-        :loading="sessions.syncing"
-        :disabled="sessions.syncing"
+        class="task-center-button"
+        aria-label="打开进度中心"
+        @click="showTaskCenter = true"
+      >
+        <span class="inline-flex items-center gap-1.5">
+          <span :class="activeJob ? 'i-lucide-loader-2 animate-spin' : 'i-lucide-activity'" class="w-3.5 h-3.5" />
+          <span>进度中心</span>
+          <span v-if="activeJob" class="task-center-status tabular-nums">{{ activeJob.done }}/{{ activeJob.total }}</span>
+          <span v-else-if="queue.hasAny" class="task-center-status">已完成</span>
+        </span>
+      </n-button>
+      <n-button
+        size="small"
+        secondary
+        class="sync-button"
+        :loading="syncing"
+        :disabled="syncing"
         @click="onSync"
       >
         <span class="inline-flex items-center gap-1.5">
-          <span v-if="!sessions.syncing" class="i-lucide-refresh-cw w-3.5 h-3.5" />
-          {{ sessions.syncing ? '同步中…' : '同步' }}
+          <span v-if="!syncing" class="i-lucide-refresh-cw w-3.5 h-3.5" />
+          {{ syncing ? '同步中…' : '同步' }}
         </span>
       </n-button>
 
-      <div class="w-px h-4 bg-slate-200 dark:bg-neutral-700 mx-1" />
+      <span class="toolbar-divider" aria-hidden="true" />
 
       <n-dropdown
         trigger="click"
@@ -186,7 +189,7 @@ async function onSync() {
 
       <n-tooltip trigger="hover" :delay="400">
         <template #trigger>
-          <n-button quaternary circle size="small" @click="showSettings = true">
+          <n-button quaternary circle size="small" aria-label="设置" @click="showSettings = true">
             <span class="i-lucide-settings w-4 h-4 text-slate-500 dark:text-slate-400" />
           </n-button>
         </template>
@@ -195,7 +198,7 @@ async function onSync() {
 
       <n-tooltip trigger="hover" :delay="400">
         <template #trigger>
-          <n-button quaternary circle size="small" @click="ui.toggleTheme()">
+          <n-button quaternary circle size="small" :aria-label="ui.darkMode ? '切换到浅色模式' : '切换到深色模式'" @click="ui.toggleTheme()">
             <span :class="ui.darkMode ? 'i-lucide-sun' : 'i-lucide-moon'" class="w-4 h-4 text-slate-500 dark:text-slate-400" />
           </n-button>
         </template>
@@ -206,4 +209,28 @@ async function onSync() {
 
   <app-update-modal v-model:show="showAppUpdate" />
   <settings-modal v-model:show="showSettings" />
+  <analysis-queue-panel v-model:show="showTaskCenter" />
 </template>
+
+<style scoped>
+.top-bar { display:flex; align-items:center; justify-content:space-between; height:64px; padding:0 22px; flex-shrink:0; border-bottom:1px solid var(--line); z-index:50; }
+.top-bar-start { display:flex; align-items:center; align-self:stretch; gap:20px; }
+.app-mark { background: var(--ink); color: var(--paper); }
+.app-version { background: color-mix(in srgb, var(--vermilion) 16%, transparent); color: var(--vermilion); }
+.product-name { display:flex; align-items:center; gap:6px; margin:0; color:var(--ink); font-family:var(--font-editorial); font-size:16px; font-weight:600; line-height:1.2; letter-spacing:.08em; }
+.product-tagline { color:var(--muted); font-size:9px; font-weight:500; line-height:1.3; letter-spacing:.12em; }
+.top-divider,.toolbar-divider { width:1px; background:var(--line); }
+.top-divider { height:24px; }
+.toolbar-divider { height:18px; margin:0 4px; }
+.top-nav { display:flex; align-items:stretch; align-self:stretch; gap:2px; }
+.top-nav-item { position:relative; display:flex; align-items:center; gap:8px; min-width:122px; padding:0 15px; background:transparent; color:var(--muted); font-size:13px; font-weight:500; letter-spacing:.01em; cursor:pointer; transition:color .18s var(--ease-out), background-color .18s var(--ease-out); }
+.top-nav-item:hover { color:var(--ink); background:color-mix(in srgb,var(--surface) 44%,transparent); }
+.top-nav-item.active { color:var(--ink); }
+.top-nav-item.active::after { content:''; position:absolute; right:15px; bottom:-1px; left:15px; height:2px; background:var(--vermilion); }
+.top-nav-icon { width:16px; height:16px; color:currentColor; opacity:.82; }
+.top-nav-item.active .top-nav-icon { color:var(--pine); opacity:1; }
+.task-center-button { min-width:104px; }
+.task-center-status { color:var(--pine); font-size:10px; }
+.sync-button { min-width:70px; }
+@media (max-width:1000px) { .product-tagline,.app-version { display:none; } .top-bar-start { gap:12px; } .top-nav-item { min-width:auto; padding:0 12px; } }
+</style>

@@ -1,19 +1,13 @@
-//! 配置读取与保存命令 —— 支持从前端设置页热更新 config.toml。
-//!
-//! ```text
-//! get_config  → 返回当前 AppConfig（JSON，snake_case）
-//! save_config → 写入磁盘 + 更新内存中的 Arc<RwLock<AppConfig>>
-//! ```
+//! 配置读取、保存与供应商连通性检查。
+
+use std::time::Duration;
 
 use tauri::State;
 
-use crate::config::{ApiConfig, AppConfig, CliConfig, CollectorConfig, DistillerConfig, SourceConfig, SyncConfig};
+use crate::config::{
+    AppConfig, CollectorConfig, DistillerConfig, ProviderProfile, SourceConfig, SyncConfig,
+};
 use crate::AppState;
-
-// ─── IPC DTO ────────────────────────────────────────────────────────────────
-//
-// 与前端 TypeScript 接口对应，字段使用 camelCase（通过 rename_all）。
-// 独立于 AppConfig（AppConfig 使用 snake_case 以兼容 TOML 格式）。
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,34 +20,22 @@ pub struct AppConfigDto {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DistillerConfigDto {
-    /// 提炼模式: "api" | "cli"
-    pub mode: String,
-    pub api: Option<ApiConfigDto>,
-    pub cli: Option<CliConfigDto>,
+    pub active_profile_id: String,
+    pub profiles: Vec<ProviderProfileDto>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ApiConfigDto {
-    /// 提供商标识（如 "openai"、"deepseek"、"openai-compatible"）
+pub struct ProviderProfileDto {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
     pub provider: String,
-    /// API Base URL（可选，为空时使用默认值）
-    pub base_url: Option<String>,
-    /// API 密钥
+    pub base_url: String,
     pub api_key: String,
-    /// 模型名称（如 "gpt-4o-mini"、"deepseek-chat"）
     pub model: String,
-    /// 请求超时（秒）
-    pub timeout_secs: u64,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CliConfigDto {
-    /// CLI 可执行文件名（如 "claude"）或本机绝对路径（如 nvm 下的 shim）
     pub command: String,
-    /// 附加参数
-    pub extra_args: Vec<String>,
+    pub timeout_secs: u64,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -74,28 +56,20 @@ pub struct SourceConfigDto {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncConfigDto {
-    pub mode: String,
-    pub interval_secs: u64,
+    pub scan_on_startup: bool,
 }
-
-// ─── DTO 转换 ────────────────────────────────────────────────────────────────
 
 impl From<&AppConfig> for AppConfigDto {
     fn from(c: &AppConfig) -> Self {
-        AppConfigDto {
+        Self {
             distiller: DistillerConfigDto {
-                mode: c.distiller.mode.clone(),
-                api: c.distiller.api.as_ref().map(|a| ApiConfigDto {
-                    provider: a.provider.clone(),
-                    base_url: a.base_url.clone(),
-                    api_key: a.api_key.clone(),
-                    model: a.model.clone(),
-                    timeout_secs: a.timeout_secs,
-                }),
-                cli: c.distiller.cli.as_ref().map(|cl| CliConfigDto {
-                    command: cl.command.clone(),
-                    extra_args: cl.extra_args.clone(),
-                }),
+                active_profile_id: c.distiller.active_profile_id.clone(),
+                profiles: c
+                    .distiller
+                    .profiles
+                    .iter()
+                    .map(ProviderProfileDto::from)
+                    .collect(),
             },
             collector: CollectorConfigDto {
                 sources: c
@@ -111,29 +85,56 @@ impl From<&AppConfig> for AppConfigDto {
                     .collect(),
             },
             sync: SyncConfigDto {
-                mode: c.sync.mode.clone(),
-                interval_secs: c.sync.interval_secs,
+                scan_on_startup: c.sync.scan_on_startup,
             },
+        }
+    }
+}
+
+impl From<&ProviderProfile> for ProviderProfileDto {
+    fn from(p: &ProviderProfile) -> Self {
+        Self {
+            id: p.id.clone(),
+            name: p.name.clone(),
+            kind: p.kind.clone(),
+            provider: p.provider.clone(),
+            base_url: p.base_url.clone(),
+            api_key: p.api_key.clone(),
+            model: p.model.clone(),
+            command: p.command.clone(),
+            timeout_secs: p.timeout_secs,
+        }
+    }
+}
+
+impl From<ProviderProfileDto> for ProviderProfile {
+    fn from(p: ProviderProfileDto) -> Self {
+        Self {
+            id: p.id,
+            name: p.name,
+            kind: p.kind,
+            provider: p.provider,
+            base_url: p.base_url,
+            api_key: p.api_key,
+            model: p.model,
+            command: p.command,
+            timeout_secs: p.timeout_secs,
         }
     }
 }
 
 impl From<AppConfigDto> for AppConfig {
     fn from(dto: AppConfigDto) -> Self {
-        AppConfig {
+        Self {
             distiller: DistillerConfig {
-                mode: dto.distiller.mode,
-                api: dto.distiller.api.map(|a| ApiConfig {
-                    provider: a.provider,
-                    base_url: a.base_url,
-                    api_key: a.api_key,
-                    model: a.model,
-                    timeout_secs: a.timeout_secs,
-                }),
-                cli: dto.distiller.cli.map(|cl| CliConfig {
-                    command: cl.command,
-                    extra_args: cl.extra_args,
-                }),
+                active_profile_id: dto.distiller.active_profile_id,
+                profiles: dto
+                    .distiller
+                    .profiles
+                    .into_iter()
+                    .map(ProviderProfile::from)
+                    .collect(),
+                legacy_api: None,
             },
             collector: CollectorConfig {
                 sources: dto
@@ -149,68 +150,108 @@ impl From<AppConfigDto> for AppConfig {
                     .collect(),
             },
             sync: SyncConfig {
-                mode: dto.sync.mode,
-                interval_secs: dto.sync.interval_secs,
+                scan_on_startup: dto.sync.scan_on_startup,
             },
         }
     }
 }
 
-// ─── Tauri 命令 ──────────────────────────────────────────────────────────────
-
-/// 读取当前配置并返回给前端。
-#[tauri::command]
-pub async fn get_config(state: State<'_, AppState>) -> Result<AppConfigDto, String> {
-    let config = state.config_snapshot();
-    Ok(AppConfigDto::from(&config))
+fn profile_params(profile: ProviderProfileDto) -> Result<serde_json::Value, String> {
+    let profile = ProviderProfile::from(profile);
+    if profile.kind == "cli" {
+        if profile.command.trim().is_empty() {
+            return Err("请先填写 CLI 命令".to_string());
+        }
+        return Ok(serde_json::json!({
+            "kind": "cli", "provider": profile.provider, "command": profile.command,
+            "model": profile.model, "timeout_secs": profile.timeout_secs,
+        }));
+    }
+    if profile.api_key.trim().is_empty() || profile.base_url.trim().is_empty() {
+        return Err("请先填写 API Key 和 Base URL".to_string());
+    }
+    Ok(serde_json::json!({
+        "kind": "api", "provider": profile.provider, "base_url": profile.base_url,
+        "api_key": profile.api_key, "model": profile.model, "timeout_secs": profile.timeout_secs,
+    }))
 }
 
-/// 接收前端配置、写入磁盘并更新内存中的 AppConfig（热更新，无需重启）。
 #[tauri::command]
-pub async fn save_config(
+pub async fn get_config(state: State<'_, AppState>) -> Result<AppConfigDto, String> {
+    Ok(AppConfigDto::from(&state.config_snapshot()))
+}
+
+#[tauri::command]
+pub async fn get_database_backup_path(
     state: State<'_, AppState>,
-    config: AppConfigDto,
-) -> Result<(), String> {
-    let mut new_config = AppConfig::from(config);
-    // 与启动加载一致：保存前再跑一遍迁移，避免前端传入旧版 ~/.codebuddy 路径
-    let _ = new_config.migrate_codebuddy_scan_dirs();
+) -> Result<Option<String>, String> {
+    Ok(state
+        .db
+        .last_backup_path()
+        .map(|path| path.display().to_string()))
+}
 
-    // 便于排查：确认落盘的 CLI command 是否为绝对路径（与 sidecar 报错中的引号内容应一致）
-    if new_config.distiller.mode == "cli" {
-        if let Some(ref cli) = new_config.distiller.cli {
-            log::info!("保存提炼配置 CLI: command={}", cli.command);
-        }
-    }
-
-    // 先写磁盘，成功后再更新内存（保证两者一致）
-    let path = AppConfig::default_path();
-    new_config.save(&path).map_err(|e| format!("配置保存失败: {}", e))?;
-
-    // 写内存（写锁）
-    let mut guard = state
+#[tauri::command]
+pub async fn save_config(state: State<'_, AppState>, config: AppConfigDto) -> Result<(), String> {
+    let new_config = AppConfig::from(config);
+    new_config.validate().map_err(|e| e.to_string())?;
+    new_config
+        .save(&AppConfig::default_path())
+        .map_err(|e| format!("配置保存失败: {e}"))?;
+    *state
         .config
         .write()
-        .map_err(|_| "配置锁异常，请重启应用".to_string())?;
-    *guard = new_config;
-    drop(guard);
-
-    log::info!("配置已热更新");
+        .map_err(|_| "配置锁异常，请重启应用".to_string())? = new_config;
     Ok(())
+}
+
+#[tauri::command]
+pub async fn list_provider_models(
+    state: State<'_, AppState>,
+    profile: ProviderProfileDto,
+) -> Result<Vec<String>, String> {
+    let sidecar = state.sidecar.as_ref().ok_or("Sidecar 未就绪")?.clone();
+    let timeout = Duration::from_secs(profile.timeout_secs.saturating_add(5));
+    let params = profile_params(profile)?;
+    tokio::task::spawn_blocking(move || sidecar.call_with_timeout("list_models", params, timeout))
+        .await
+        .map_err(|e| format!("模型列表任务失败：{e}"))?
+        .map_err(|e| format!("模型列表加载失败：{e}"))
+}
+
+#[tauri::command]
+pub async fn test_provider(
+    state: State<'_, AppState>,
+    profile: ProviderProfileDto,
+) -> Result<String, String> {
+    let sidecar = state.sidecar.as_ref().ok_or("Sidecar 未就绪")?.clone();
+    let timeout = Duration::from_secs(profile.timeout_secs.saturating_add(5));
+    let params = profile_params(profile)?;
+    tokio::task::spawn_blocking(move || sidecar.call_with_timeout("test_provider", params, timeout))
+        .await
+        .map_err(|e| format!("连接测试任务失败：{e}"))?
+        .map_err(|e| format!("连接测试失败：{e}"))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// 确认前端 camelCase JSON 中长路径 command 不会被截断（若失败则 IPC 反序列化有问题）
     #[test]
-    fn cli_config_dto_deserializes_abs_path_from_frontend_json() {
-        let json = r#"{"command":"/Users/foo/.nvm/versions/node/v20.19.4/bin/claude-internal","extraArgs":[]}"#;
-        let dto: CliConfigDto = serde_json::from_str(json).unwrap();
-        assert_eq!(
-            dto.command,
-            "/Users/foo/.nvm/versions/node/v20.19.4/bin/claude-internal"
-        );
-        assert!(dto.extra_args.is_empty());
+    fn profile_dto_uses_camel_case() {
+        let json = serde_json::to_value(ProviderProfileDto {
+            id: "sf".into(),
+            name: "硅基流动".into(),
+            kind: "api".into(),
+            provider: "siliconflow".into(),
+            base_url: "https://api.siliconflow.cn/v1".into(),
+            api_key: "secret".into(),
+            model: "deepseek-ai/DeepSeek-V3".into(),
+            command: String::new(),
+            timeout_secs: 120,
+        })
+        .unwrap();
+        assert_eq!(json["baseUrl"], "https://api.siliconflow.cn/v1");
+        assert!(json.get("base_url").is_none());
     }
 }

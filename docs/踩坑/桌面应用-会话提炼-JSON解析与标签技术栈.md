@@ -56,8 +56,8 @@
 
 ### 解决方法（已实现）
 
-- 环境变量 **`XUNJI_LOG_DISTILL_PAYLOAD=1`**：打印完整 system + user（sidecar stderr）。
-- **开发构建**（`tauri dev` / `debug_assertions`）：若在进程环境中**未设置**该变量，桌面应用在启动时会**默认设为 `1`**；若需关闭，启动前设置 **`XUNJI_LOG_DISTILL_PAYLOAD=0`**（已存在则不覆盖）。
+- 环境变量 **`CHATTAKE_LOG_DISTILL_PAYLOAD=1`**：打印完整 system + user（sidecar stderr）。
+- **开发构建**（`tauri dev` / `debug_assertions`）：若在进程环境中**未设置**该变量，桌面应用在启动时会**默认设为 `1`**；若需关闭，启动前设置 **`CHATTAKE_LOG_DISTILL_PAYLOAD=0`**（已存在则不覆盖）。
 
 ---
 
@@ -127,7 +127,7 @@
 | 标签/技术栈归一化 | `packages/sidecar/src/distiller/tech-tags.ts` |
 | HTTP 载荷日志 | `packages/sidecar/src/distiller/payload-log.ts` |
 | trace 与统一日志前缀 | `packages/sidecar/src/distiller/trace.ts` |
-| 开发环境默认 `XUNJI_LOG_DISTILL_PAYLOAD` | `apps/desktop/src-tauri/src/lib.rs`（`run()` 开头） |
+| 开发环境默认 `CHATTAKE_LOG_DISTILL_PAYLOAD` | `apps/desktop/src-tauri/src/lib.rs`（`run()` 开头） |
 
 ---
 

@@ -2,31 +2,40 @@
  * 与 Rust Tauri 返回值对应的 TypeScript 类型（字段名使用 camelCase，与 serde 配置一致）
  */
 
-export interface SyncResult {
-  found: number
-  new: number
-  updated: number
-  skipped: number
+export type JobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'interrupted'
+
+export interface JobItem {
+  id: string
+  jobId: string
+  sessionId: string | null
+  sourceId: string | null
+  rawPath: string | null
+  status: JobStatus
+  phase: string
+  durationMs: number | null
+  error: string | null
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
 }
 
-/**
- * distill_session 返回结果。
- *
- * - isLowValue = true：价值为 low / none，已更新 DB，无卡片产出
- * - isLowValue = false：已生成笔记卡片，card 有值
- */
-export interface DistillSessionResult {
-  /** 本次分析 trace，与终端 sidecar / Rust 日志一致，grep 此 id 可串联全流程 */
-  traceId: string
-  value: string
-  isLowValue: boolean
-  /** 低/无价值时：由 reason 截取的简短标题 */
-  cardTitle: string | null
-  /** 低/无价值时：judge_value 返回的对话类型（英文枚举，展示用 @xunji/shared getCardTypeLabel） */
-  cardType: string | null
-  /** 低/无价值时的原因说明（作为摘要展示） */
-  reason: string | null
-  card: Card | null
+export interface Job {
+  id: string
+  kind: 'sync' | 'analysis'
+  status: JobStatus
+  phase: string
+  done: number
+  total: number
+  cancelRequested: boolean
+  error: string | null
+  providerProfileId: string | null
+  provider: string | null
+  baseUrl: string | null
+  model: string | null
+  createdAt: string
+  startedAt: string | null
+  finishedAt: string | null
+  items: JobItem[]
 }
 
 export interface PaginatedResult<T> {
@@ -34,6 +43,11 @@ export interface PaginatedResult<T> {
   total: number
   page: number
   pageSize: number
+}
+
+export interface CursorPage<T> {
+  items: T[]
+  nextCursor: number | null
 }
 
 /** 列表行：会话摘要 */
@@ -104,14 +118,14 @@ export interface Message {
 export interface Card {
   id: string
   sessionId: string
+  analysisRunId: string | null
   title: string
   type: string | null
   value: string | null
   summary: string | null
   note: string
-  categoryId: string | null
-  memory: string | null
-  skill: string | null
+  publicationStatus: 'draft' | 'published'
+  isUserEdited: boolean
   sourceName: string | null
   projectName: string | null
   promptTokens: number
@@ -136,11 +150,14 @@ export interface CardSummary {
   type: string | null
   value: string | null
   summary: string | null
-  categoryId: string | null
+  publicationStatus: 'draft' | 'published'
   sourceName: string | null
   projectName: string | null
   createdAt: string
   updatedAt: string
+  matchSnippet: string | null
+  tags: string[]
+  technologies: string[]
 }
 
 export interface SessionListParams {
@@ -192,8 +209,25 @@ export interface ListCardsParams {
   value?: string | null
   /** 技术栈名称列表，AND 语义（卡片 tech_stack 字段需同时包含所选项） */
   techStack?: string[] | null
+  publicationStatus?: 'draft' | 'published'
   page?: number
   pageSize?: number
+}
+
+export interface TagRecord {
+  id: string
+  name: string
+  normalizedName: string
+  kind: 'topic' | 'technology'
+}
+
+export interface CardUpdatePayload {
+  title: string
+  cardType: string
+  summary: string
+  note: string
+  tags: string[]
+  technologies: string[]
 }
 
 // ─── 配置相关类型（与 Rust AppConfigDto 对应） ───────────────────────────────
@@ -205,36 +239,20 @@ export interface AppConfigDto {
 }
 
 export interface DistillerConfigDto {
-  /** 提炼模式: "api" | "cli" */
-  mode: string
-  api: ApiConfigDto | null
-  cli: CliConfigDto | null
+  activeProfileId: string
+  profiles: ProviderProfileDto[]
 }
 
-export interface ApiConfigDto {
-  /** 提供商标识（如 "openai"、"deepseek"、"openai-compatible"） */
-  provider: string
-  /** API Base URL（可选） */
-  baseUrl: string | null
-  /** API 密钥 */
-  apiKey: string
-  /** 模型名称 */
-  model: string
-  /** 请求超时（秒） */
-  timeoutSecs: number
-}
-
-export interface CliConfigDto {
-  /** CLI 命令名或可执行文件绝对路径 */
-  command: string
-  /** 附加参数 */
-  extraArgs: string[]
-}
-
-/** `probe_cli_tools` 返回：候选名与登录 shell 下解析到的绝对路径 */
-export interface CliProbeResult {
+export interface ProviderProfileDto {
+  id: string
   name: string
-  resolvedPath: string | null
+  kind: 'api' | 'cli'
+  provider: string
+  baseUrl: string
+  apiKey: string
+  model: string
+  command: string
+  timeoutSecs: number
 }
 
 export interface CollectorConfigDto {
@@ -249,6 +267,12 @@ export interface SourceConfigDto {
 }
 
 export interface SyncConfigDto {
-  mode: string
-  intervalSecs: number
+  scanOnStartup: boolean
+}
+
+export interface McpInfo {
+  available: boolean
+  binaryPath: string | null
+  databasePath: string
+  configSnippet: string | null
 }

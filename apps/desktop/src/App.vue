@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import {
   NConfigProvider,
   NMessageProvider,
@@ -11,11 +12,36 @@ import AppLayout from './components/AppLayout.vue'
 import { useUiStore } from './stores/ui'
 
 const ui = useUiStore()
+const themeOverrides = computed(() => ({
+  common: {
+    primaryColor: ui.darkMode ? '#86aa9e' : '#31594f',
+    primaryColorHover: ui.darkMode ? '#9bbcaf' : '#406f62',
+    primaryColorPressed: ui.darkMode ? '#6e9286' : '#27493f',
+    borderRadius: '8px',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif',
+  },
+  Button: {
+    heightTiny: '28px',
+    heightSmall: '32px',
+    heightMedium: '36px',
+    borderRadiusTiny: '7px',
+    borderRadiusSmall: '8px',
+    borderRadiusMedium: '8px',
+    fontSizeTiny: '11px',
+    fontSizeSmall: '12px',
+    fontSizeMedium: '13px',
+  },
+  Input: {
+    heightSmall: '32px',
+    heightMedium: '38px',
+    borderRadius: '8px',
+  },
+}))
 </script>
 
 <template>
   <!-- NConfigProvider 为 Naive UI 组件提供全局主题 + 中文 locale -->
-  <n-config-provider :theme="ui.darkMode ? darkTheme : undefined" :locale="zhCN" :date-locale="dateZhCN">
+  <n-config-provider :theme="ui.darkMode ? darkTheme : undefined" :theme-overrides="themeOverrides" :locale="zhCN" :date-locale="dateZhCN">
     <!-- useMessage / useDialog（导出确认、Toast 等）依赖以下 Provider -->
     <n-message-provider>
       <n-dialog-provider>
@@ -27,13 +53,48 @@ const ui = useUiStore()
 
 <style>
 :root {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Helvetica, Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', sans-serif;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  --brand-500: #10b981;
-  --brand-600: #059669;
+  --canvas: #f3f0e8;
+  --surface: #faf8f2;
+  --surface-glass: rgba(250, 248, 242, .78);
+  --ink: #1a1c1a;
+  --ink-soft: #4f524e;
+  --muted: #62655f;
+  --line: #d7d2c8;
+  --line-strong: #c9c5bb;
+  --pine: #31594f;
+  --pine-soft: #dce8e2;
+  --vermilion: #a84b27;
+  --paper: var(--canvas);
+  --paper-raised: var(--surface);
+  --font-editorial: 'Songti SC', 'STSong', 'Noto Serif CJK SC', serif;
+  --brand-500: var(--pine);
+  --brand-600: #254339;
+  --control-height: 36px;
+  --control-height-sm: 32px;
+  --control-radius: 8px;
+  --panel-radius: 12px;
+  --ease-out: cubic-bezier(.22, 1, .36, 1);
+  color: var(--ink);
+  background: var(--paper);
+}
+
+:root.dark {
+  --canvas: #151714;
+  --surface: #1c1f1b;
+  --surface-glass: rgba(28, 31, 27, .8);
+  --ink: #f2efe7;
+  --ink-soft: #c5c5bd;
+  --muted: #989a94;
+  --line: #343832;
+  --line-strong: #464a43;
+  --pine: #86aa9e;
+  --pine-soft: #243a33;
+  --vermilion: #dc7650;
 }
 
 *,
@@ -44,6 +105,37 @@ const ui = useUiStore()
 
 body {
   margin: 0;
+  color: var(--ink);
+  background: var(--paper);
+}
+
+.glass-bar,
+.glass-sidebar,
+.glass-panel {
+  background: var(--surface-glass) !important;
+  backdrop-filter: blur(24px) saturate(1.06);
+  -webkit-backdrop-filter: blur(24px) saturate(1.06);
+}
+
+.glass-bar { border-color: color-mix(in srgb, var(--line) 72%, transparent) !important; }
+.glass-sidebar { border-color: color-mix(in srgb, var(--line) 66%, transparent) !important; }
+
+::selection { background: color-mix(in srgb, var(--vermilion) 28%, transparent); }
+
+:root:not(.dark) .text-slate-400,
+:root:not(.dark) .text-neutral-400,
+:root:not(.dark) .text-slate-500,
+:root:not(.dark) .text-neutral-500 { color:var(--muted) !important; }
+:root.dark .dark\:text-slate-500,
+:root.dark .dark\:text-neutral-500 { color:var(--muted) !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
 }
 
 /* Webkit 滚动条 */
@@ -72,5 +164,21 @@ button.segment-pill-btn {
   appearance: none;
   margin: 0;
   font: inherit;
+}
+
+button.ui-tab,
+button.ui-icon-toggle,
+button.filter-chip {
+  -webkit-appearance: none;
+  appearance: none;
+  border: 0;
+  font: inherit;
+}
+
+button.ui-tab:focus-visible,
+button.ui-icon-toggle:focus-visible,
+button.filter-chip:focus-visible {
+  outline: 2px solid var(--pine);
+  outline-offset: 2px;
 }
 </style>

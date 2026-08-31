@@ -15,7 +15,7 @@ export default defineConfig({
   // 强制 vue 单例，防止 bun/pnpm 混合安装导致多份 Vue 实例
   resolve: {
     alias: {
-      '@xunji/shared': sharedRoot,
+      '@chattake/shared': sharedRoot,
     },
     dedupe: ['vue'],
   },
@@ -27,6 +27,16 @@ export default defineConfig({
     hmr: host ? { protocol: 'ws', host, port: 1421 } : undefined,
     watch: {
       ignored: ['**/src-tauri/**'],
+    },
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('/node_modules/highlight.js/') || id.includes('/node_modules/marked/')) return 'vendor-markdown'
+          if (id.includes('/node_modules/vue/') || id.includes('/node_modules/vue-router/') || id.includes('/node_modules/pinia/')) return 'vendor-vue'
+        },
+      },
     },
   },
 })

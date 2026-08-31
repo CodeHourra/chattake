@@ -4,7 +4,7 @@
 
 /** 是否在文案中追加 Sidecar / 配置相关提示 */
 export function shouldAppendSidecarHint(message: string): boolean {
-  return /sidecar|xunji-sidecar|未找到.*可执行|distill_session join/i.test(message)
+  return /sidecar|chattake-sidecar|未找到.*可执行|distill_session join/i.test(message)
 }
 
 export function shouldAppendApiHint(message: string): boolean {
@@ -19,7 +19,7 @@ export function appendDistillHint(message: string): string {
   if (!m) return m
   if (m.includes('请确认已构建') || m.includes('请检查设置中的 API')) return m
   if (shouldAppendSidecarHint(m)) {
-    return `${m} — 请确认已构建 packages/sidecar，或在「设置 → 提炼引擎」检查 API/CLI 模式与密钥。`
+    return `${m} — 请确认已构建 packages/sidecar，或在「设置 → AI 配置」检查当前配置与密钥。`
   }
   if (shouldAppendApiHint(m)) {
     return `${m} — 请检查设置中的 API Key、模型、超时与网络。`

@@ -1,22 +1,20 @@
 /**
- * Distiller 模块入口 —— 组装前处理器 + Provider（API 或 CLI）+ Prompt 模板，
+ * Distiller 模块入口 —— 组装前处理器 + OpenAI-compatible API + Prompt 模板，
  * 导出 JSON-RPC handler 供 index.ts 注册使用。
  *
- * Provider 选择策略（由 init 命令的 mode 参数决定）：
- *   mode = "api" → ApiProvider（HTTP OpenAI-compatible）
- *   mode = "cli" → CliProvider（本地 CLI 工具如 claude / gemini）
+ * v0.2 支持 OpenAI-compatible API 与本地 CLI Provider。
  */
 
 import { createHash } from 'node:crypto'
 
-import { clean, truncate } from './preprocessor'
-import { PROMPT_B_LIGHT, PROMPT_B_FULL } from './prompts'
-import { ApiProvider, type ApiProviderConfig, type DistillResult } from './api-provider'
-import { CliProvider, type CliProviderConfig } from './cli-provider'
+import { preprocess } from './preprocessor'
+import { PROMPT_EXTRACT_KNOWLEDGE, PROMPT_JUDGE_VALUE } from './prompts'
+import { ApiProvider, listApiModels, ModelListHttpError, type ApiProviderConfig, type DistillResult } from './api-provider'
+import { CliProvider, testCliProvider, type CliProviderConfig } from './cli-provider'
 import { normalizeLlmTags, normalizeLlmTechStack } from './tech-tags'
 import { distillLog, resolveTraceId } from './trace'
 
-/** 统一的 Provider 接口（API 和 CLI 均实现） */
+/** 提炼调用需要的最小 Provider 契约。 */
 interface Provider {
   distill(
     systemPrompt: string,
@@ -28,24 +26,23 @@ interface Provider {
 
 let provider: Provider | null = null
 
-/** LLM 提炼结果类型定义（完整版） */
-export interface DistillFullResult {
+export interface KnowledgeItem {
   title: string
   type: string
-  value: string
-  value_reason?: string
   summary: string
   note: string
-  tags: string[]
-  tech_stack: string[]
+  topic_tags: string[]
+  technologies: string[]
+}
+
+export interface ExtractKnowledgeResult {
+  items: KnowledgeItem[]
   prompt_tokens: number
   completion_tokens: number
 }
 
-/** 价值判断结果类型定义（轻量版） */
 export interface JudgeValueResult {
   value: string
-  type: string
   reason: string
   prompt_tokens: number
   completion_tokens: number
@@ -59,27 +56,16 @@ export function initApiProvider(config: ApiProviderConfig): void {
   console.error(`[distiller] API Provider initialized: ${config.provider}/${config.model}`)
 }
 
-/**
- * 初始化 CLI Provider（mode = "cli"）。
- */
 export function initCliProvider(config: CliProviderConfig): void {
   provider = new CliProvider(config)
-  console.error(`[distiller] CLI Provider initialized: command=${config.command}`)
+  console.error(`[distiller] CLI Provider initialized: ${config.provider}/${config.model || 'default'}`)
 }
 
 function getProvider(): Provider {
   if (!provider) {
-    throw new Error('Distiller 未初始化，请先调用 init 方法配置 API')
+    throw new Error('Distiller 未初始化，请先调用 init 方法配置 Provider')
   }
   return provider
-}
-
-/**
- * 对对话内容做前处理（清理 + 截断）
- */
-function preprocess(content: string): string {
-  const cleaned = clean(content)
-  return truncate(cleaned)
 }
 
 /**
@@ -268,76 +254,20 @@ function extractJson(text: string, traceId: string): unknown {
   )
 }
 
-/**
- * 将 LLM 返回的「完整提炼」JSON 规范化为 DistillFullResult 所需字段。
- *
- * 说明：不少模型会输出 camelCase（如 techStack），而协议与 Rust 侧约定为 snake_case（tech_stack）。
- * 若不做归一化，Rust 反序列化时 tech_stack 会落默认空数组，前端笔记头就永远没有技术栈。
- */
-function normalizeDistillFullParsed(
-  raw: Record<string, unknown>,
-  traceId: string,
-): {
-  title: string
-  type: string
-  value: string
-  value_reason?: string
-  summary: string
-  note: string
-  tags: string[]
-  tech_stack: string[]
-} {
-  const tags = normalizeLlmTags(raw.tags)
-  // tech_stack / techStack 二选一（及少数模型用大写键的兜底）
-  const tech_stack = normalizeLlmTechStack(
-    raw.tech_stack ?? raw.techStack ?? raw['TechStack'],
-  )
-
-  console.error(
-    distillLog(
-      traceId,
-      `normalize: LLM JSON 顶层键: ${Object.keys(raw).join(', ')}`,
-    ),
-  )
-  console.error(
-    distillLog(
-      traceId,
-      `normalize: tech 相关原始值 tech_stack=${JSON.stringify(raw.tech_stack)} techStack=${JSON.stringify(raw.techStack)} TechStack=${JSON.stringify(raw['TechStack'])}`,
-    ),
-  )
-  console.error(
-    distillLog(
-      traceId,
-      `normalize: 标签 归一化后共 ${tags.length} 项（已限 5、去重）: ${JSON.stringify(tags)}`,
-    ),
-  )
-  console.error(
-    distillLog(
-      traceId,
-      `normalize: tech_stack 归一化后共 ${tech_stack.length} 项（已限 8、去重）: ${JSON.stringify(tech_stack)}`,
-    ),
-  )
-
-  return {
-    title: typeof raw.title === 'string' ? raw.title : '',
-    type: typeof raw.type === 'string' ? raw.type : 'other',
-    value: typeof raw.value === 'string' ? raw.value : 'medium',
-    value_reason:
-      typeof raw.value_reason === 'string' ? raw.value_reason : undefined,
-    summary: typeof raw.summary === 'string' ? raw.summary : '',
-    note: typeof raw.note === 'string' ? raw.note : '',
-    tags,
-    tech_stack,
-  }
-}
-
 // ── JSON-RPC Handlers ──
 
-/**
- * judge_value handler —— 轻量价值判断。
- * 输入：{ content: string }
- * 输出：{ value, type, reason, prompt_tokens, completion_tokens }
- */
+export async function handlePreprocess(
+  params: Record<string, unknown>,
+): Promise<{ content: string }> {
+  if (typeof params.content !== 'string' || !params.content.trim()) {
+    throw new Error('参数缺失或类型错误: content 必须为非空字符串')
+  }
+  const traceId = resolveTraceId(params)
+  const processed = preprocess(params.content)
+  logContentPreview('preprocess', params.content.length, processed, traceId)
+  return { content: processed }
+}
+
 export async function handleJudgeValue(
   params: Record<string, unknown>,
 ): Promise<JudgeValueResult> {
@@ -348,10 +278,7 @@ export async function handleJudgeValue(
   const content = params.content
 
   const p = getProvider()
-  const processed = preprocess(content)
-  logContentPreview('judge_value', content.length, processed, traceId)
-
-  const result = await p.distill(PROMPT_B_LIGHT, processed, 'judge_value', traceId)
+  const result = await p.distill(PROMPT_JUDGE_VALUE, content, 'judge_value', traceId)
   console.error(
     distillLog(
       traceId,
@@ -359,33 +286,25 @@ export async function handleJudgeValue(
     ),
   )
 
-  const parsed = extractJson(result.content, traceId) as {
-    value: string
-    type: string
-    reason: string
+  const parsed = extractJson(result.content, traceId) as Record<string, unknown>
+  const value = typeof parsed.value === 'string' ? parsed.value.toLowerCase() : ''
+  const reason = typeof parsed.reason === 'string' ? parsed.reason.trim() : ''
+  if (!['high', 'medium', 'low', 'none'].includes(value) || !reason) {
+    throw new Error('响应格式错误: judge_value 需要有效的 value 与 reason')
   }
-  console.error(
-    distillLog(
-      traceId,
-      `judge_value 结果: value=${parsed.value}, type=${parsed.type}`,
-    ),
-  )
+  console.error(distillLog(traceId, `judge_value 结果: value=${value}`))
 
   return {
-    ...parsed,
+    value,
+    reason,
     prompt_tokens: result.promptTokens,
     completion_tokens: result.completionTokens,
   }
 }
 
-/**
- * distill_full handler —— 完整技术笔记提炼。
- * 输入：{ content: string }
- * 输出：{ title, type, value, summary, note, tags, tech_stack, prompt_tokens, completion_tokens }
- */
-export async function handleDistillFull(
+export async function handleExtractKnowledge(
   params: Record<string, unknown>,
-): Promise<DistillFullResult> {
+): Promise<ExtractKnowledgeResult> {
   if (typeof params.content !== 'string' || !params.content.trim()) {
     throw new Error('参数缺失或类型错误: content 必须为非空字符串')
   }
@@ -393,28 +312,35 @@ export async function handleDistillFull(
   const content = params.content
 
   const p = getProvider()
-  const processed = preprocess(content)
-  logContentPreview('distill_full', content.length, processed, traceId)
-
-  const result = await p.distill(PROMPT_B_FULL, processed, 'distill_full', traceId)
+  const result = await p.distill(PROMPT_EXTRACT_KNOWLEDGE, content, 'extract_knowledge', traceId)
   console.error(
     distillLog(
       traceId,
-      `distill_full: LLM 响应 ${result.content.length} 字符，tokens: in=${result.promptTokens} out=${result.completionTokens}`,
+      `extract_knowledge: LLM 响应 ${result.content.length} 字符，tokens: in=${result.promptTokens} out=${result.completionTokens}`,
     ),
   )
 
-  const rawObj = extractJson(result.content, traceId) as Record<string, unknown>
-  const parsed = normalizeDistillFullParsed(rawObj, traceId)
-  console.error(
-    distillLog(
-      traceId,
-      `distill_full 结果: value=${parsed.value}, type=${parsed.type}, title="${parsed.title}", tech_stack=${JSON.stringify(parsed.tech_stack)}`,
-    ),
-  )
+  const raw = extractJson(result.content, traceId) as Record<string, unknown>
+  const allowedTypes = new Set(['decision', 'troubleshooting', 'implementation', 'explanation', 'snippet'])
+  const items = (Array.isArray(raw.items) ? raw.items : [])
+    .slice(0, 3)
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+    .map((item) => ({
+      title: typeof item.title === 'string' ? item.title.trim() : '',
+      type: typeof item.type === 'string' && allowedTypes.has(item.type) ? item.type : '',
+      summary: typeof item.summary === 'string' ? item.summary.trim() : '',
+      note: typeof item.note === 'string' ? item.note.trim() : '',
+      topic_tags: normalizeLlmTags(item.topic_tags ?? item.topicTags),
+      technologies: normalizeLlmTechStack(item.technologies ?? item.tech_stack ?? item.techStack),
+    }))
+    .filter((item) => item.title && item.type && item.summary && item.note)
+  if (items.length < 1) {
+    throw new Error('响应格式错误: extract_knowledge 需要 1–3 个完整知识项')
+  }
+  console.error(distillLog(traceId, `extract_knowledge 结果: items=${items.length}`))
 
   return {
-    ...parsed,
+    items,
     prompt_tokens: result.promptTokens,
     completion_tokens: result.completionTokens,
   }
@@ -424,44 +350,33 @@ export async function handleDistillFull(
  * init handler —— 初始化 Provider 配置。
  * 由 Rust 侧在 sidecar 启动后调用。
  *
- * API 模式输入：{ mode: "api", provider, base_url, api_key, model, timeout_secs? }
- * CLI 模式输入：{ mode: "cli", command, extra_args? }
- * 旧格式兼容：  { api_key, provider, base_url, model }（无 mode 字段时默认 api 模式）
+ * 输入：API 或 CLI Provider 配置。
  */
 export async function handleInit(
   params: Record<string, unknown>,
 ): Promise<{ status: string }> {
-  const mode = typeof params.mode === 'string' ? params.mode : 'api'
+  if (params.kind === 'cli') initCliProvider(parseCliConfig(params))
+  else initApiProvider(parseApiConfig(params))
+  return { status: 'ok' }
+}
 
-  if (mode === 'cli') {
-    // CLI 模式：command 支持短名（依赖 PATH）或可执行文件绝对路径；统一 trim，避免首尾空格导致 ENOENT
-    const rawCmd = params.command
-    const command = typeof rawCmd === 'string' ? rawCmd.trim() : ''
-    if (!command) {
-      throw new Error('参数缺失或类型错误: CLI 模式需要 command 字段（命令名或可执行文件绝对路径）')
-    }
-    // Rust 侧传 extra_args；若将来有其它调用方传 camelCase，一并兼容
-    const extraFromSnake = params.extra_args
-    const extraFromCamel = params.extraArgs
-    const extraArr = Array.isArray(extraFromSnake)
-      ? (extraFromSnake as string[])
-      : Array.isArray(extraFromCamel)
-        ? (extraFromCamel as string[])
-        : []
-    const cliConfig: CliProviderConfig = {
-      command,
-      extraArgs: extraArr,
-    }
-    initCliProvider(cliConfig)
-    return { status: 'ok' }
+function parseCliConfig(params: Record<string, unknown>): CliProviderConfig {
+  if (typeof params.command !== 'string' || !params.command.trim()) {
+    throw new Error('参数缺失或类型错误: 需要 command 字段')
   }
+  return {
+    provider: typeof params.provider === 'string' ? params.provider : 'custom-cli',
+    command: params.command,
+    model: typeof params.model === 'string' ? params.model : undefined,
+    timeoutMs: typeof params.timeout_secs === 'number' ? params.timeout_secs * 1000 : undefined,
+  }
+}
 
-  // API 模式（默认）
+function parseApiConfig(params: Record<string, unknown>): ApiProviderConfig {
   if (typeof params.api_key !== 'string' || !params.api_key.trim()) {
-    throw new Error('参数缺失或类型错误: API 模式需要 api_key 字段')
+    throw new Error('参数缺失或类型错误: 需要 api_key 字段')
   }
-
-  const apiConfig: ApiProviderConfig = {
+  return {
     provider: typeof params.provider === 'string' ? params.provider : 'openai-compatible',
     baseUrl: typeof params.base_url === 'string' ? params.base_url : 'https://api.openai.com/v1',
     apiKey: params.api_key,
@@ -469,6 +384,25 @@ export async function handleInit(
     timeoutMs: typeof params.timeout_secs === 'number' ? params.timeout_secs * 1000 : undefined,
   }
 
-  initApiProvider(apiConfig)
-  return { status: 'ok' }
+}
+
+export async function handleListModels(params: Record<string, unknown>): Promise<string[]> {
+  if (params.kind === 'cli') return []
+  return listApiModels(parseApiConfig(params))
+}
+
+export async function handleTestProvider(params: Record<string, unknown>): Promise<string> {
+  if (params.kind === 'cli') return testCliProvider(parseCliConfig(params))
+  const config = parseApiConfig(params)
+  try {
+    await listApiModels(config)
+    return '模型列表接口连接成功'
+  } catch (modelsError) {
+    if (!(modelsError instanceof ModelListHttpError) || ![404, 405, 501].includes(modelsError.status)) {
+      throw modelsError
+    }
+    if (!config.model.trim()) throw modelsError
+    await new ApiProvider(config).testConnection()
+    return '最小 Chat Completions 请求成功（供应商未提供可用的模型列表接口）'
+  }
 }

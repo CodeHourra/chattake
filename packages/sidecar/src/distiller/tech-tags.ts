@@ -15,8 +15,8 @@
  *    调用 `list_tech_stack_counts`，若库中列为空则侧栏仍为空。
  */
 
-const MAX_TAGS = 5
-const MAX_TECH = 8
+const MAX_TAGS = 3
+const MAX_TECH = 5
 
 /**
  * 去重（忽略大小写）、trim、合并连续空白；保留**首次出现**的展示写法。
@@ -34,14 +34,14 @@ function normalizeLabelList(raw: string[], max: number): string[] {
   return [...seen.values()]
 }
 
-/** LLM 产出的 tags：最多 5 条，避免侧栏标签爆炸 */
+/** 主题标签最多 3 条，避免侧栏标签爆炸。 */
 export function normalizeLlmTags(raw: unknown): string[] {
   if (!Array.isArray(raw)) return []
   const strs = raw.filter((x): x is string => typeof x === 'string')
   return normalizeLabelList(strs, MAX_TAGS)
 }
 
-/** LLM 产出的 tech_stack：最多 8 条，蛇形键归一化后写入 */
+/** 技术项最多 5 条。 */
 export function normalizeLlmTechStack(raw: unknown): string[] {
   if (!Array.isArray(raw)) return []
   const strs = raw.filter((x): x is string => typeof x === 'string')

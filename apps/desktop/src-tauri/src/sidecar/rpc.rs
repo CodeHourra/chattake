@@ -8,8 +8,8 @@
 use std::io::{BufRead, BufReader, Write};
 use std::process::{ChildStdin, ChildStdout};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::{mpsc, Mutex};
+use std::time::{Duration, Instant};
 
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -19,8 +19,9 @@ const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
 /// JSON-RPC 2.0 客户端，持有 sidecar 进程的 stdin/stdout
 pub struct RpcClient {
+    calls: Mutex<()>,
     stdin: Mutex<ChildStdin>,
-    stdout: Mutex<BufReader<ChildStdout>>,
+    responses: Mutex<mpsc::Receiver<Result<String, String>>>,
     request_id: AtomicU64,
     /// RPC 调用默认超时时间
     timeout: Duration,
@@ -28,9 +29,32 @@ pub struct RpcClient {
 
 impl RpcClient {
     pub fn new(stdin: ChildStdin, stdout: ChildStdout) -> Self {
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut reader = BufReader::new(stdout);
+            loop {
+                let mut line = String::new();
+                match reader.read_line(&mut line) {
+                    Ok(0) => {
+                        let _ = tx.send(Err("Sidecar stdout 已关闭".into()));
+                        break;
+                    }
+                    Ok(_) => {
+                        if tx.send(Ok(line)).is_err() {
+                            break;
+                        }
+                    }
+                    Err(error) => {
+                        let _ = tx.send(Err(error.to_string()));
+                        break;
+                    }
+                }
+            }
+        });
         Self {
+            calls: Mutex::new(()),
             stdin: Mutex::new(stdin),
-            stdout: Mutex::new(BufReader::new(stdout)),
+            responses: Mutex::new(rx),
             request_id: AtomicU64::new(1),
             timeout: Duration::from_secs(DEFAULT_TIMEOUT_SECS),
         }
@@ -56,6 +80,11 @@ impl RpcClient {
         params: Value,
         timeout: Duration,
     ) -> Result<T, RpcError> {
+        // Sidecar 允许并发处理请求，但桌面端当前不需要并发；整体串行可避免响应串线。
+        let _call_guard = self
+            .calls
+            .lock()
+            .map_err(|_| RpcError::Internal("call lock poisoned".into()))?;
         let id = self.request_id.fetch_add(1, Ordering::SeqCst);
 
         let request = serde_json::json!({
@@ -65,35 +94,52 @@ impl RpcClient {
             "id": id,
         });
 
-        let request_str = serde_json::to_string(&request)
-            .map_err(|e| RpcError::Serialize(e.to_string()))?;
+        let request_str =
+            serde_json::to_string(&request).map_err(|e| RpcError::Serialize(e.to_string()))?;
 
-        log::debug!("RPC 请求: method={}, id={}, timeout={}s", method, id, timeout.as_secs());
+        log::debug!(
+            "RPC 请求: method={}, id={}, timeout={}s",
+            method,
+            id,
+            timeout.as_secs()
+        );
 
         // 写 stdin
         {
-            let mut stdin = self.stdin.lock()
+            let mut stdin = self
+                .stdin
+                .lock()
                 .map_err(|_| RpcError::Internal("stdin lock poisoned".into()))?;
-            writeln!(stdin, "{}", request_str)
-                .map_err(|e| RpcError::Io(e.to_string()))?;
-            stdin.flush()
-                .map_err(|e| RpcError::Io(e.to_string()))?;
+            writeln!(stdin, "{}", request_str).map_err(|e| RpcError::Io(e.to_string()))?;
+            stdin.flush().map_err(|e| RpcError::Io(e.to_string()))?;
         }
 
-        // 读 stdout，通过独立线程 + channel 实现超时控制
-        let response_str = self.read_response_with_timeout(timeout)?;
-
-        if response_str.trim().is_empty() {
-            return Err(RpcError::Io("Sidecar 返回空响应（进程可能已退出）".into()));
-        }
-
-        // 解析响应
-        let response: Value = serde_json::from_str(response_str.trim())
-            .map_err(|e| RpcError::Deserialize(format!(
-                "响应解析失败: {} - {}",
-                e,
-                &response_str[..response_str.len().min(200)]
-            )))?;
+        // 超时请求的迟到响应可能仍在队列中；按 id 丢弃，直到拿到本次响应。
+        let deadline = Instant::now() + timeout;
+        let response = loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(RpcError::Timeout(timeout.as_secs()));
+            }
+            let response_str = self.read_response_with_timeout(remaining)?;
+            if response_str.trim().is_empty() {
+                return Err(RpcError::Io("Sidecar 返回空响应（进程可能已退出）".into()));
+            }
+            let response: Value = serde_json::from_str(response_str.trim()).map_err(|e| {
+                RpcError::Deserialize(format!(
+                    "响应解析失败: {} - {}",
+                    e,
+                    &response_str[..response_str.len().min(200)]
+                ))
+            })?;
+            if response.get("id").and_then(Value::as_u64) == Some(id) {
+                break response;
+            }
+            log::warn!(
+                "丢弃非当前 RPC 响应: expected_id={id}, actual_id={:?}",
+                response.get("id")
+            );
+        };
 
         // 检查 error 字段
         if let Some(err) = response.get("error") {
@@ -106,7 +152,8 @@ impl RpcClient {
         }
 
         // 提取 result 字段并反序列化为目标类型
-        let result = response.get("result")
+        let result = response
+            .get("result")
             .ok_or_else(|| RpcError::Deserialize("响应缺少 result 字段".into()))?;
 
         serde_json::from_value(result.clone())
@@ -115,38 +162,20 @@ impl RpcClient {
 
     /// 带超时的 stdout 读取。
     ///
-    /// 实现方式：scoped thread 内阻塞读取 + channel recv_timeout。
-    /// `std::thread::scope` 保证子线程在作用域内结束，无需 unsafe。
+    /// stdout 由常驻读取线程持有；当前线程只在 channel 上等待，因此超时会立即返回。
     fn read_response_with_timeout(&self, timeout: Duration) -> Result<String, RpcError> {
-        let mut stdout = self.stdout.lock()
-            .map_err(|_| RpcError::Internal("stdout lock poisoned".into()))?;
-
-        let (tx, rx) = std::sync::mpsc::channel::<Result<String, String>>();
-
-        // scoped thread 可以安全借用栈上的 MutexGuard
-        std::thread::scope(|s| {
-            let reader = &mut *stdout;
-            s.spawn(move || {
-                let mut line = String::new();
-                match reader.read_line(&mut line) {
-                    Ok(_) => { let _ = tx.send(Ok(line)); }
-                    Err(e) => { let _ = tx.send(Err(e.to_string())); }
-                }
-            });
-
-            // 在 scope 内等待结果（带超时）
-            // scope 结束时会自动 join 子线程
-            match rx.recv_timeout(timeout) {
-                Ok(Ok(line)) => Ok(line),
-                Ok(Err(e)) => Err(RpcError::Io(e)),
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    Err(RpcError::Timeout(timeout.as_secs()))
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    Err(RpcError::Io("读取线程异常退出".into()))
-                }
+        let responses = self
+            .responses
+            .lock()
+            .map_err(|_| RpcError::Internal("response lock poisoned".into()))?;
+        match responses.recv_timeout(timeout) {
+            Ok(Ok(line)) => Ok(line),
+            Ok(Err(error)) => Err(RpcError::Io(error)),
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(RpcError::Timeout(timeout.as_secs())),
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                Err(RpcError::Io("读取线程异常退出".into()))
             }
-        })
+        }
     }
 }
 

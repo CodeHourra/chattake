@@ -1,12 +1,12 @@
 [package]
-name = "xunji-desktop"
-version = "0.1.6"
-description = "寻迹 - AI 编程知识管理平台"
-authors = ["XunJi"]
+name = "chattake-desktop"
+version = "0.2.0"
+description = "有得 · AI 对话知识库"
+authors = ["ChatTake"]
 edition = "2021"
 
 [lib]
-name = "xunji_desktop_lib"
+name = "chattake_desktop_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
 [build-dependencies]

@@ -14,7 +14,7 @@ const ui = useUiStore()
 router.afterEach((to) => {
   if (to.name === 'library') {
     ui.activeTab = 'library'
-  } else {
+  } else if (to.name === 'sessions') {
     ui.activeTab = 'sessions'
   }
 })

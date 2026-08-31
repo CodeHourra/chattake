@@ -21,7 +21,10 @@ use rusqlite::Connection;
 
 use crate::path_local::decode_cursor_folder_to_local_path;
 
-use super::normalizer::{NormalizedMessage, NormalizedSession};
+use super::normalizer::{
+    file_fingerprint, normalize_user_content, CollectionBatch, CollectionFailure,
+    NormalizedMessage, NormalizedSession,
+};
 
 /// Cursor 数据采集器
 pub struct CursorCollector {
@@ -35,8 +38,16 @@ impl CursorCollector {
     }
 
     /// 扫描所有配置的目录，返回解析后的标准化会话列表
+    #[cfg(test)]
     pub fn collect(&self) -> Vec<NormalizedSession> {
-        let mut all_sessions = Vec::new();
+        self.collect_changed(|_, _, _| false).sessions
+    }
+
+    pub fn collect_changed<F>(&self, unchanged: F) -> CollectionBatch
+    where
+        F: Fn(&Path, i64, i64) -> bool,
+    {
+        let mut batch = CollectionBatch::default();
 
         for base_dir in &self.scan_dirs {
             let global_db_path = base_dir
@@ -46,27 +57,47 @@ impl CursorCollector {
             let ws_base = base_dir.join("User").join("workspaceStorage");
 
             if !global_db_path.exists() {
-                log::debug!("Cursor 全局数据库不存在，跳过: {}", global_db_path.display());
+                log::debug!(
+                    "Cursor 全局数据库不存在，跳过: {}",
+                    global_db_path.display()
+                );
+                continue;
+            }
+            batch.found += 1;
+            let (raw_mtime_ms, raw_size_bytes) = match sqlite_fingerprint(&global_db_path) {
+                Some(fingerprint) => fingerprint,
+                None => continue,
+            };
+            if unchanged(&global_db_path, raw_mtime_ms, raw_size_bytes) {
+                batch.skipped += 1;
+                batch
+                    .skipped_paths
+                    .push(global_db_path.to_string_lossy().into_owned());
                 continue;
             }
 
-            match self.collect_from_dir(&global_db_path, &ws_base) {
-                Ok(mut sessions) => {
+            match self.collect_from_dir(&global_db_path, &ws_base, raw_mtime_ms, raw_size_bytes) {
+                Ok(mut found) => {
                     log::info!(
                         "从 {} 扫描到 {} 个 Cursor 会话",
                         base_dir.display(),
-                        sessions.len()
+                        found.sessions.len()
                     );
-                    all_sessions.append(&mut sessions);
+                    batch.sessions.append(&mut found.sessions);
+                    batch.failures.append(&mut found.failures);
+                    batch.skipped_paths.append(&mut found.skipped_paths);
                 }
                 Err(e) => {
-                    log::error!("扫描 Cursor 目录失败: {} - {}", base_dir.display(), e);
+                    batch.failures.push(CollectionFailure {
+                        raw_path: global_db_path.to_string_lossy().into_owned(),
+                        error: e.to_string(),
+                    });
                 }
             }
         }
 
-        log::info!("Cursor 采集完成，共 {} 个会话", all_sessions.len());
-        all_sessions
+        log::info!("Cursor 采集完成，共 {} 个会话", batch.sessions.len());
+        batch
     }
 
     /// 从单个 Cursor 安装目录采集会话
@@ -74,7 +105,9 @@ impl CursorCollector {
         &self,
         global_db_path: &Path,
         ws_base: &Path,
-    ) -> Result<Vec<NormalizedSession>, Box<dyn std::error::Error>> {
+        raw_mtime_ms: i64,
+        raw_size_bytes: i64,
+    ) -> Result<CollectionBatch, Box<dyn std::error::Error>> {
         // Step 1: 扫描所有 workspace，建立 composerId → (project_path, name) 映射
         let workspace_map = scan_workspaces(ws_base)?;
         log::debug!("发现 {} 个 workspace", workspace_map.len());
@@ -85,25 +118,45 @@ impl CursorCollector {
             rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
 
-        let mut sessions = Vec::new();
+        let mut batch = CollectionBatch::default();
 
         // 遍历所有 workspace 中的 composer
         for (composer_id, ws_info) in &workspace_map {
-            match read_composer_session(&conn, composer_id, ws_info) {
+            match read_composer_session(
+                &conn,
+                composer_id,
+                ws_info,
+                global_db_path,
+                raw_mtime_ms,
+                raw_size_bytes,
+            ) {
                 Ok(Some(session)) => {
-                    sessions.push(session);
+                    batch.sessions.push(session);
                 }
                 Ok(None) => {
                     // 会话无有效消息，跳过
                 }
                 Err(e) => {
-                    log::warn!("读取 Cursor 会话失败: {} - {}", composer_id, e);
+                    batch.failures.push(CollectionFailure {
+                        raw_path: format!("{}#{}", global_db_path.display(), composer_id),
+                        error: e.to_string(),
+                    });
                 }
             }
         }
 
-        Ok(sessions)
+        Ok(batch)
     }
+}
+
+fn sqlite_fingerprint(db_path: &Path) -> Option<(i64, i64)> {
+    let mut fingerprint = file_fingerprint(db_path)?;
+    let wal_path = PathBuf::from(format!("{}-wal", db_path.to_string_lossy()));
+    if let Some((mtime, size)) = file_fingerprint(&wal_path) {
+        fingerprint.0 = fingerprint.0.max(mtime);
+        fingerprint.1 = fingerprint.1.saturating_add(size);
+    }
+    Some(fingerprint)
 }
 
 // ── Workspace 扫描 ──
@@ -241,6 +294,9 @@ fn read_composer_session(
     conn: &Connection,
     composer_id: &str,
     ws_info: &WorkspaceInfo,
+    raw_path: &Path,
+    raw_mtime_ms: i64,
+    raw_size_bytes: i64,
 ) -> Result<Option<NormalizedSession>, Box<dyn std::error::Error>> {
     // 读取 composerData 获取 bubble 列表
     let key = format!("composerData:{}", composer_id);
@@ -266,9 +322,7 @@ fn read_composer_session(
     }
 
     // 从 composerData 中获取 createdAt（毫秒时间戳），作为备选
-    let composer_created_at = data["createdAt"]
-        .as_i64()
-        .or(ws_info.created_at);
+    let composer_created_at = data["createdAt"].as_i64().or(ws_info.created_at);
 
     // 逐个读取 bubble 内容
     let mut messages = Vec::new();
@@ -308,6 +362,14 @@ fn read_composer_session(
         if content.trim().is_empty() {
             continue;
         }
+        let content = if role == "user" {
+            match normalize_user_content(&content) {
+                Some(content) => content,
+                None => continue,
+            }
+        } else {
+            content
+        };
 
         let token_count = &bubble_data["tokenCount"];
         let tokens_in = token_count["inputTokens"].as_u64().unwrap_or(0) as u32;
@@ -349,7 +411,9 @@ fn read_composer_session(
         project_name: ws_info.project_name.clone(),
         analysis_title: None,
         messages,
-        raw_path: format!("cursor://composer/{}", composer_id),
+        raw_path: raw_path.to_string_lossy().to_string(),
+        raw_mtime_ms: Some(raw_mtime_ms),
+        raw_size_bytes: Some(raw_size_bytes),
         created_at,
         updated_at,
     }))
@@ -543,11 +607,7 @@ mod tests {
     fn test_read_workspace_project_path() {
         let dir = tempfile::tempdir().unwrap();
         let json_path = dir.path().join("workspace.json");
-        std::fs::write(
-            &json_path,
-            r#"{"folder":"file:///Users/steve/myproject"}"#,
-        )
-        .unwrap();
+        std::fs::write(&json_path, r#"{"folder":"file:///Users/steve/myproject"}"#).unwrap();
 
         let result = read_workspace_project_path(&json_path);
         assert_eq!(result, Some("/Users/steve/myproject".to_string()));
@@ -573,9 +633,7 @@ mod tests {
     #[ignore]
     fn test_real_local_data() {
         let home = dirs::home_dir().unwrap();
-        let collector = CursorCollector::new(vec![
-            home.join("Library/Application Support/Cursor"),
-        ]);
+        let collector = CursorCollector::new(vec![home.join("Library/Application Support/Cursor")]);
 
         let sessions = collector.collect();
         println!("\n=== Cursor 采集结果 ===");

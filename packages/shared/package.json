@@ -1,6 +1,6 @@
 {
-  "name": "@xunji/shared",
-  "version": "0.1.3",
+  "name": "@chattake/shared",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",

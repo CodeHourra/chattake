@@ -1,10 +1,4 @@
-/**
- * 对话内容前处理器 —— 清理 AI 内部标签 + 超长截断。
- *
- * 在送入 LLM 提炼之前，需要：
- * 1. 剥离 <thinking>、<tool_use> 等对知识提炼无价值的 XML 标签
- * 2. 将超长对话截断到安全长度，保留头部（问题背景）和尾部（最终结论）
- */
+/** 清理内部标签，并在 24k 字符预算内保留完整首尾轮次与均匀中段样本。 */
 
 /** 需要从对话中剥离的 XML 标签模式 */
 const STRIP_PATTERNS = [
@@ -17,37 +11,53 @@ const STRIP_PATTERNS = [
   /<antml_thinking>[\s\S]*?<\/antml_thinking>/g,
 ]
 
-/**
- * 清理对话内容中的 AI 内部数据标签。
- * 这些内容（推理过程、工具调用 XML）对知识提炼无价值，且浪费 token。
- */
 export function clean(content: string): string {
   let result = content
-  for (const pattern of STRIP_PATTERNS) {
-    result = result.replace(pattern, '')
-  }
-  // 清除连续多个空行（清理后留下的空白）
-  result = result.replace(/\n{3,}/g, '\n\n')
-  return result.trim()
+  for (const pattern of STRIP_PATTERNS) result = result.replace(pattern, '')
+  return result.replace(/\n{3,}/g, '\n\n').trim()
 }
 
-/**
- * 截断超长内容，保留头尾以保持上下文完整性。
- *
- * 策略：保留开头 headChars（问题背景）+ 结尾 tailChars（最终结论），
- * 中间以省略标记替代。
- */
-export function truncate(
-  content: string,
-  maxChars: number = 12000,
-  headChars: number = 8000,
-  tailChars: number = 4000,
-): string {
-  if (content.length <= maxChars) {
-    return content
+function fitEdge(block: string, budget: number): string {
+  if (block.length <= budget) return block
+  const marker = '\n[… 单轮内容超出预算 …]\n'
+  const keep = Math.max(0, budget - marker.length)
+  const head = Math.floor(keep / 2)
+  return `${block.slice(0, head)}${marker}${block.slice(-(keep - head))}`
+}
+
+export function truncate(content: string, maxChars = 24_000): string {
+  if (content.length <= maxChars) return content
+
+  const blocks = content.split(/\n\n(?=\[(?:user|assistant|model)\]\n)/i)
+  if (blocks.length < 2) return fitEdge(content, maxChars)
+
+  const marker = '\n\n[… 已按完整轮次均匀抽样 …]\n\n'
+  const edgeBudget = Math.floor((maxChars - marker.length) * 0.36)
+  const first = fitEdge(blocks[0], edgeBudget)
+  const last = fitEdge(blocks.at(-1)!, edgeBudget)
+  const middle = blocks.slice(1, -1)
+  let budget = maxChars - first.length - last.length - marker.length
+  const picked: string[] = []
+
+  if (budget > 0 && middle.length) {
+    const average = middle.reduce((sum, block) => sum + block.length + 2, 0) / middle.length
+    const count = Math.max(1, Math.min(middle.length, Math.floor(budget / average)))
+    const indexes = new Set<number>()
+    for (let i = 0; i < count; i++) {
+      indexes.add(Math.round(((i + 1) * (middle.length + 1)) / (count + 1)) - 1)
+    }
+    for (const index of [...indexes].sort((a, b) => a - b)) {
+      const block = middle[index]
+      if (block.length + 2 <= budget) {
+        picked.push(block)
+        budget -= block.length + 2
+      }
+    }
   }
 
-  const head = content.slice(0, headChars)
-  const tail = content.slice(-tailChars)
-  return `${head}\n\n[... 中间内容已省略（原文 ${content.length} 字符）...]\n\n${tail}`
+  return [first, marker.trim(), ...picked, last].join('\n\n').slice(0, maxChars)
+}
+
+export function preprocess(content: string, maxChars = 24_000): string {
+  return truncate(clean(content), maxChars)
 }

@@ -14,7 +14,6 @@
 | 文件                                                                                   | 概要                          |
 | ------------------------------------------------------------------------------------ | --------------------------- |
 | [Bun-bun-run命令写法差异.md](./Bun-bun-run命令写法差异.md)                                       | `bun run` 与嵌套 `bun bun run` |
-| [CLI-LLM-JSON解析失败.md](./CLI-LLM-JSON解析失败.md)                                         | CLI 产出 JSON 解析              |
 | [Monorepo-混用包管理器.md](./Monorepo-混用包管理器.md)                                           | 锁文件与依赖一致性                   |
 | [Naive-UI-Vue重复实例白屏.md](./Naive-UI-Vue重复实例白屏.md)                                     | 多份 Vue 运行时                  |
 | [工具结果-role识别.md](./工具结果-role识别.md)                                                   | tool result 角色识别            |
@@ -26,7 +25,5 @@
 | [桌面应用-会话提炼-JSON解析与标签技术栈.md](./桌面应用-会话提炼-JSON解析与标签技术栈.md)                             | 提炼 JSON / 标签 / 技术栈          |
 | [桌面应用-会话重同步覆盖analysis标题.md](./桌面应用-会话重同步覆盖analysis标题.md)                             | 重同步与 analysis 标题            |
 | [桌面应用-分段控件-WebView原生button默认样式.md](./桌面应用-分段控件-WebView原生button默认样式.md)               | WebView 原生按钮外观              |
-| [桌面应用-提炼-CLI路径与环境变量.md](./桌面应用-提炼-CLI路径与环境变量.md)                                     | 提炼 CLI 路径 / PATH            |
 | [桌面应用-脚手架-UnoCSS-Tauri与存储层常见问题.md](./桌面应用-脚手架-UnoCSS-Tauri与存储层常见问题.md)               | 脚手架、UnoCSS、Tauri、存储         |
-
 

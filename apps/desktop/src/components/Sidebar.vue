@@ -16,14 +16,20 @@ import { useUiStore } from '../stores/ui'
 import { useFiltersStore } from '../stores/filters'
 import { useSessionsStore } from '../stores/sessions'
 import { useSidebarStore } from '../stores/sidebar'
-import { getCardTypeLabel } from '@xunji/shared'
+import { getCardTypeLabel } from '@chattake/shared'
 import { api } from '../lib/tauri'
 import type { SessionFilterPayload } from '../types'
 
 // 品牌图标（官方 logo，通过 Vite asset URL 导入）
 import claudeCodeIcon from '../assets/brands/claude-code.png?url'
-import cursorIcon from '../assets/brands/cursor.png?url'
 import codebuddyIcon from '../assets/brands/codebuddy.svg?url'
+import openaiIcon from '../assets/brands/openai.svg?url'
+import cursorLightIcon from '../assets/brands/cursor-light.svg?url'
+import cursorDarkIcon from '../assets/brands/cursor-dark.svg?url'
+import ompLightIcon from '../assets/brands/omp-light.svg?url'
+import ompDarkIcon from '../assets/brands/omp-dark.svg?url'
+import piLightIcon from '../assets/brands/pi-light.svg?url'
+import piDarkIcon from '../assets/brands/pi-dark.svg?url'
 
 const ui = useUiStore()
 const filters = useFiltersStore()
@@ -49,11 +55,13 @@ const checkedKeys = ref<string[]>([])
  * 数据源元信息：每个 source_id 对应其品牌标签和图标
  * imgIcon 优先使用品牌 SVG；fallbackIcon 为 UnoCSS 类名兜底
  */
-const SOURCE_META: Record<string, { label: string; imgIcon?: string; fallbackIcon: string }> = {
+const SOURCE_META: Record<string, { label: string; imgIcon?: string; darkImgIcon?: string; fallbackIcon: string }> = {
   'claude-code': { label: 'Claude Code', imgIcon: claudeCodeIcon, fallbackIcon: 'i-lucide-terminal' },
-  'cursor': { label: 'Cursor', imgIcon: cursorIcon, fallbackIcon: 'i-lucide-mouse-pointer-click' },
-  'codebuddy-cli': { label: 'CodeBuddy', imgIcon: codebuddyIcon, fallbackIcon: 'i-lucide-code' },
-  'codebuddy-jetbrains': { label: 'CodeBuddy JB', imgIcon: codebuddyIcon, fallbackIcon: 'i-lucide-braces' },
+  'cursor': { label: 'Cursor', imgIcon: cursorLightIcon, darkImgIcon: cursorDarkIcon, fallbackIcon: 'i-lucide-mouse-pointer-click' },
+  codebuddy: { label: 'CodeBuddy', imgIcon: codebuddyIcon, fallbackIcon: 'i-lucide-code' },
+  codex: { label: 'Codex', imgIcon: openaiIcon, fallbackIcon: 'i-lucide-code-2' },
+  omp: { label: 'Oh My Pi', imgIcon: ompLightIcon, darkImgIcon: ompDarkIcon, fallbackIcon: 'i-lucide-orbit' },
+  pi: { label: 'Pi', imgIcon: piLightIcon, darkImgIcon: piDarkIcon, fallbackIcon: 'i-lucide-circle-dot' },
 }
 
 function getSourceMeta(sourceId: string) {
@@ -64,7 +72,12 @@ function getSourceMeta(sourceId: string) {
 function renderSourceIcon(sourceId: string) {
   const meta = getSourceMeta(sourceId)
   if (meta.imgIcon) {
-    return h('img', { src: meta.imgIcon, class: 'brand-icon', width: 16, height: 16 })
+    const lightIcon = h('img', { src: meta.imgIcon, alt: '', 'aria-hidden': 'true', class: 'brand-icon brand-icon-light', width: 16, height: 16 })
+    if (!meta.darkImgIcon) return lightIcon
+    return h('span', { class: 'brand-icon-pair', 'aria-hidden': 'true' }, [
+      lightIcon,
+      h('img', { src: meta.darkImgIcon, alt: '', class: 'brand-icon brand-icon-dark', width: 16, height: 16 }),
+    ])
   }
   return h('span', { class: `${meta.fallbackIcon} w-4 h-4 opacity-70` })
 }
@@ -428,7 +441,7 @@ watch(() => ui.activeTab, (tab) => {
 
 <template>
   <!-- min-h-0：参与 flex 布局时让内层 overflow-y-auto 能正确截断高度，单滚动条生效 -->
-  <aside class="shrink-0 flex flex-col min-h-0 w-[260px] bg-white dark:bg-neutral-950 border-r border-slate-200 dark:border-neutral-800 select-none">
+  <aside class="glass-sidebar shrink-0 flex flex-col min-h-0 border-r select-none">
     <div class="flex-1 overflow-y-auto">
 
       <!-- ============== 对话记录模式 ============== -->
@@ -436,17 +449,19 @@ watch(() => ui.activeTab, (tab) => {
         <!-- 顶部操作区 -->
         <div class="p-3 pb-2 space-y-2 border-b border-slate-100 dark:border-neutral-800">
           <!-- 全部对话按钮 -->
-          <div
-            class="flex items-center gap-2 px-2.5 py-1.5 rounded-md transition-colors cursor-pointer text-sm font-medium"
+          <button
+            type="button"
+            class="appearance-none border-0 bg-transparent w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md transition-colors cursor-pointer text-sm font-medium"
             :class="isAllMode
-              ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300'
+              ? 'all-active'
               : 'text-slate-700 dark:text-neutral-300 hover:bg-slate-100 dark:hover:bg-neutral-900'"
+            :aria-pressed="isAllMode"
             @click="selectAll"
           >
             <span class="i-lucide-messages-square w-4 h-4 shrink-0" />
             <span>全部对话</span>
             <span class="ml-auto text-xs opacity-80 tabular-nums">{{ totalSessions }}</span>
-          </div>
+          </button>
 
           <!-- 会话整理按钮 -->
           <n-tooltip
@@ -537,15 +552,15 @@ watch(() => ui.activeTab, (tab) => {
       <!-- ============== 知识库模式 ============== -->
       <template v-else>
         <!-- 不单独 overflow：与外层 aside 共用一个滚动条，避免类型/标签/技术栈多重竖条 -->
-        <div class="p-4 pb-6 space-y-6">
+        <div class="library-filter-panel">
           <!-- 有筛选时提供一键重置，避免类型/标签/技术栈分散清除 -->
           <div
             v-if="filters.hasLibraryFilters"
-            class="flex items-center justify-between gap-2 rounded-lg border border-slate-200 dark:border-neutral-800 bg-slate-50/80 dark:bg-neutral-900/50 px-2.5 py-2"
+            class="filter-summary"
           >
-            <span class="text-[11px] text-slate-500 dark:text-neutral-400 leading-snug">已应用筛选</span>
-            <n-button size="tiny" secondary class="shrink-0" @click="filters.resetLibrary()">
-              重置
+            <span>筛选已启用</span>
+            <n-button size="tiny" quaternary class="shrink-0" @click="filters.resetLibrary()">
+              清除
             </n-button>
           </div>
 
@@ -566,40 +581,33 @@ watch(() => ui.activeTab, (tab) => {
                   </span>
                   <span
                     v-if="filters.cardType"
-                    class="truncate text-[10px] font-medium text-emerald-600 dark:text-emerald-400 normal-case tracking-normal"
+                    class="truncate text-[10px] font-medium normal-case tracking-normal selected-count"
                   >
                     {{ getCardTypeLabel(filters.cardType) }}
                   </span>
                 </div>
               </template>
-              <p class="text-[10px] text-slate-400 dark:text-neutral-500 mb-2 leading-relaxed">
-                单选；点「全部」或已选类型可恢复不限类型。
-              </p>
-              <div class="flex flex-wrap gap-2">
-                <span
-                  :class="[
-                    'px-2.5 py-1 rounded-full text-xs font-medium cursor-pointer transition-colors',
-                    !filters.cardType
-                      ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60'
-                      : 'text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-neutral-700 hover:bg-slate-50 dark:hover:bg-neutral-800',
-                  ]"
+              <div class="filter-chip-list">
+                <button
+                  type="button"
+                  class="filter-chip"
+                  :class="{ selected: !filters.cardType }"
+                  :aria-pressed="!filters.cardType"
                   @click="filters.cardType = ''"
                 >
-                  全部 <span class="opacity-60 ml-0.5 text-[10px]">{{ totalCards }}</span>
-                </span>
-                <span
+                  <span>全部</span><small>{{ totalCards }}</small>
+                </button>
+                <button
                   v-for="t in sidebar.cardTypes"
                   :key="t.name"
-                  :class="[
-                    'px-2.5 py-1 rounded-full text-xs cursor-pointer transition-colors',
-                    filters.cardType === t.name
-                      ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60 font-medium'
-                      : 'text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-neutral-700 hover:bg-slate-50 dark:hover:bg-neutral-800',
-                  ]"
+                  type="button"
+                  class="filter-chip"
+                  :class="{ selected: filters.cardType === t.name }"
+                  :aria-pressed="filters.cardType === t.name"
                   @click="selectCardType(t.name)"
                 >
-                  {{ getCardTypeLabel(t.name) }} <span class="opacity-60 ml-0.5 text-[10px]">{{ t.count }}</span>
-                </span>
+                  <span>{{ getCardTypeLabel(t.name) }}</span><small>{{ t.count }}</small>
+                </button>
               </div>
             </n-collapse-item>
 
@@ -612,32 +620,27 @@ watch(() => ui.activeTab, (tab) => {
                   </span>
                   <span
                     v-if="filters.selectedTags.length"
-                    class="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 normal-case tracking-normal tabular-nums"
+                    class="text-[10px] font-medium normal-case tracking-normal tabular-nums selected-count"
                   >
                     {{ filters.selectedTags.length }} 项
                   </span>
                 </div>
               </template>
-              <p class="text-[10px] text-slate-400 dark:text-neutral-500 mb-2 leading-relaxed">
-                多选为「且」：笔记须同时包含所选标签。
-              </p>
               <div v-if="sidebar.tagsLoading" class="flex items-center justify-center py-4">
                 <n-spin size="small" />
               </div>
-              <div v-else-if="sidebar.tags.length" class="flex flex-wrap gap-1.5">
-                <span
+              <div v-else-if="sidebar.tags.length" class="filter-chip-list">
+                <button
                   v-for="tag in sidebar.tags"
                   :key="tag.name"
-                  :class="[
-                    'px-2.5 py-1 rounded-full text-xs cursor-pointer transition-colors',
-                    filters.selectedTags.includes(tag.name)
-                      ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60 font-medium'
-                      : 'text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-neutral-700 hover:bg-slate-50 dark:hover:bg-neutral-800',
-                  ]"
+                  type="button"
+                  class="filter-chip"
+                  :class="{ selected: filters.selectedTags.includes(tag.name) }"
+                  :aria-pressed="filters.selectedTags.includes(tag.name)"
                   @click="toggleTag(tag.name)"
                 >
-                  {{ tag.name }} <span class="opacity-50 ml-0.5 text-[10px]">{{ tag.count }}</span>
-                </span>
+                  <span>{{ tag.name }}</span><small>{{ tag.count }}</small>
+                </button>
               </div>
               <n-empty v-else size="small" description="暂无标签" class="py-2" />
             </n-collapse-item>
@@ -651,39 +654,29 @@ watch(() => ui.activeTab, (tab) => {
                   </span>
                   <span
                     v-if="filters.selectedTechStacks.length"
-                    class="text-[10px] font-medium text-sky-600 dark:text-sky-400 normal-case tracking-normal tabular-nums"
+                    class="text-[10px] font-medium normal-case tracking-normal tabular-nums selected-count"
                   >
                     {{ filters.selectedTechStacks.length }} 项
                   </span>
                 </div>
               </template>
-              <p class="text-[10px] text-slate-400 dark:text-neutral-500 mb-2 leading-relaxed">
-                多选为「且」：笔记的 tech_stack 须同时包含所选项（大小写不敏感）。
-              </p>
               <div v-if="sidebar.tagsLoading" class="flex items-center justify-center py-3">
                 <n-spin size="small" />
               </div>
-              <div v-else-if="sidebar.techStacks.length" class="flex flex-wrap gap-1.5">
-                <span
+              <div v-else-if="sidebar.techStacks.length" class="filter-chip-list">
+                <button
                   v-for="row in sidebar.techStacks"
                   :key="row.name"
-                  :class="[
-                    'px-2.5 py-1 rounded-full text-xs cursor-pointer transition-colors',
-                    filters.selectedTechStacks.includes(row.name)
-                      ? 'bg-sky-50 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800/60 font-medium'
-                      : 'text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-neutral-700 hover:bg-slate-50 dark:hover:bg-neutral-800',
-                  ]"
+                  type="button"
+                  class="filter-chip"
+                  :class="{ selected: filters.selectedTechStacks.includes(row.name) }"
+                  :aria-pressed="filters.selectedTechStacks.includes(row.name)"
                   @click="toggleTechStack(row.name)"
                 >
-                  {{ row.name }} <span class="opacity-50 ml-0.5 text-[10px]">{{ row.count }}</span>
-                </span>
+                  <span>{{ row.name }}</span><small>{{ row.count }}</small>
+                </button>
               </div>
-              <p v-else class="text-[11px] text-slate-400 dark:text-neutral-500 py-2 leading-relaxed">
-                暂无。需会话经提炼写入 tech_stack；排查终端
-                <code class="text-[10px] opacity-90">normalize: tech_stack</code>
-                与
-                <code class="text-[10px] opacity-90">创建卡片: … tech_stack列</code>
-              </p>
+              <p v-else class="filter-empty">提炼完成后，识别出的技术项会显示在这里。</p>
             </n-collapse-item>
           </n-collapse>
         </div>
@@ -694,6 +687,8 @@ watch(() => ui.activeTab, (tab) => {
 </template>
 
 <style scoped>
+.glass-sidebar { width: clamp(232px, 18vw, 282px); border-color:var(--line); }
+.all-active { color:var(--pine); background:color-mix(in srgb,var(--pine) 10%,transparent); }
 .sidebar-tree :deep(.n-tree-node-content__text) {
   font-size: 13px;
   overflow: hidden;
@@ -713,14 +708,26 @@ watch(() => ui.activeTab, (tab) => {
 .sidebar-tree :deep(.n-tree-node-content) {
   overflow: hidden;
 }
-/* 品牌图标：圆角使外观更精致 */
+.brand-icon-pair { display:inline-flex; width:16px; height:16px; }
 .brand-icon {
   width: 16px;
   height: 16px;
-  border-radius: 3px;
   display: inline-block;
   flex-shrink: 0;
+  object-fit: contain;
 }
+.brand-icon-dark { display:none; }
+:global(.dark) .brand-icon-light { display:none; }
+:global(.dark) .brand-icon-dark { display:inline-block; }
+.library-filter-panel { display:flex; flex-direction:column; gap:18px; padding:16px 16px 24px; }
+.filter-summary { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:7px 4px 7px 10px; border-left:2px solid var(--vermilion); color:var(--muted); font-size:11px; }
+.filter-chip-list { display:flex; flex-wrap:wrap; gap:6px; }
+.filter-chip { display:inline-flex; align-items:center; gap:6px; min-height:28px; padding:0 9px; border:1px solid var(--line) !important; border-radius:7px; background:transparent; color:var(--ink-soft); font-size:11px; cursor:pointer; transition:border-color .16s var(--ease-out), background-color .16s var(--ease-out), color .16s var(--ease-out); }
+.filter-chip:hover { border-color:var(--line-strong) !important; background:color-mix(in srgb,var(--surface) 58%,transparent); color:var(--ink); }
+.filter-chip.selected { border-color:color-mix(in srgb,var(--pine) 42%,var(--line)) !important; background:color-mix(in srgb,var(--pine) 10%,transparent); color:var(--pine); font-weight:600; }
+.filter-chip small { color:var(--muted); font-size:10px; font-variant-numeric:tabular-nums; }
+.selected-count { color:var(--pine); }
+.filter-empty { margin:2px 0 0; color:var(--muted); font-size:11px; line-height:1.65; }
 
 /* 知识库折叠：面板内容随侧栏整体滚动，禁止 Naive 内部再出现滚动条 */
 .library-filters-collapse :deep(.n-collapse-item__content-wrapper) {
@@ -729,17 +736,14 @@ watch(() => ui.activeTab, (tab) => {
 .library-filters-collapse :deep(.n-collapse-item__content-inner) {
   overflow: visible !important;
   max-height: none !important;
-  padding-top: 0;
-  padding-bottom: 10px;
+  padding-top: 2px;
+  padding-bottom: 12px;
 }
 .library-filters-collapse :deep(.n-collapse-item__header) {
   padding-top: 6px;
   padding-bottom: 6px;
 }
 .library-filters-collapse :deep(.n-collapse-item:not(:first-child)) {
-  border-top: 1px solid rgb(241 245 249);
-}
-.dark .library-filters-collapse :deep(.n-collapse-item:not(:first-child)) {
-  border-top-color: rgb(38 38 38);
+  border-top: 1px solid var(--line);
 }
 </style>

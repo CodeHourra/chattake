@@ -10,42 +10,15 @@ import { useSearchStore } from '../stores/search'
 import { useAnalysisQueueStore } from '../stores/analysisQueue'
 import { api } from '../lib/tauri'
 import { appendDistillHint } from '../lib/distillHints'
+import { getCardTypeLabel } from '@chattake/shared'
 
 const sessions = useSessionsStore()
 const router = useRouter()
 const search = useSearchStore()
 const queue = useAnalysisQueueStore()
 
-// ── 批量分析完成统计（仅批量入口使用 callbacks 计数） ───────────────────────
-
-const batchExpected = ref(0)
-const batchFinished = ref(0)
-const batchSuccess = ref(0)
-const batchFail = ref(0)
-
 /** 知识库卡片总数：用于区分「无笔记可搜」与「关键词无匹配」 */
 const libraryCardTotal = ref<number | null>(null)
-
-function resetBatchStats() {
-  batchExpected.value = 0
-  batchFinished.value = 0
-  batchSuccess.value = 0
-  batchFail.value = 0
-}
-
-function tryFinishBatchToast() {
-  if (batchExpected.value === 0) return
-  if (batchFinished.value < batchExpected.value) return
-  if (batchFail.value === 0) {
-    showToast(`批量分析完成，共处理 ${batchSuccess.value} 条`)
-  } else {
-    showToast(
-      `分析完成：成功 ${batchSuccess.value}，失败 ${batchFail.value}`,
-      batchFail.value > 0 ? 'error' : 'success',
-    )
-  }
-  resetBatchStats()
-}
 
 // ── 批量选择 ─────────────────────────────────────────────────────────────────
 
@@ -64,6 +37,10 @@ function showToast(msg: string, type: 'success' | 'error' | 'warning' = 'success
   setTimeout(() => {
     toast.value = null
   }, type === 'error' ? 9000 : 4000)
+}
+
+function plainSnippet(value: string | null) {
+  return value?.replace(/<\/?mark>/g, '') ?? ''
 }
 
 // ── 生命周期 ─────────────────────────────────────────────────────────────────
@@ -109,38 +86,23 @@ const indeterminate = computed(
 )
 
 // 批量分析进行中：队列里仍有来自本次批量预期的任务未完成
-const batchRunning = computed(
-  () => batchExpected.value > 0 && batchFinished.value < batchExpected.value,
-)
+const activeAnalysisJob = computed(() => queue.jobs.find(
+  (job) => job.kind === 'analysis' && (job.status === 'queued' || job.status === 'running'),
+))
+const batchRunning = computed(() => (activeAnalysisJob.value?.total ?? 0) > 1)
+const batchFinished = computed(() => activeAnalysisJob.value?.done ?? 0)
+const batchExpected = computed(() => activeAnalysisJob.value?.total ?? 0)
 
 // ── 方法 ─────────────────────────────────────────────────────────────────────
 
 /** 单条分析（从 SessionCard 触发） */
-function onAnalyze(sessionId: string) {
-  const s = sessions.items.find((x) => x.id === sessionId)
-  const title = s?.cardTitle || s?.projectName || sessionId
-  queue.enqueue(sessionId, title, {
-    onLowValue: (result) => {
-      showToast(
-        `已判断为${result.value === 'none' ? '无价值' : '低价值'}：${result.reason ?? ''}`,
-        'warning',
-      )
-    },
-    onSuccess: (result) => {
-      const card = result.card
-      if (card) {
-        showToast(`笔记已生成：${card.title}`)
-        void router.push({
-          name: 'session-detail',
-          params: { sessionId },
-          query: { cardId: card.id },
-        })
-      }
-    },
-    onError: (msg) => {
-      showToast(msg, 'error')
-    },
-  })
+async function onAnalyze(sessionId: string) {
+  try {
+    await queue.startAnalysis([sessionId])
+    showToast('分析任务已创建，可在进度中心查看阶段和进度')
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : String(error), 'error')
+  }
 }
 
 function toggleBatchMode() {
@@ -171,37 +133,18 @@ function onSelectionChange(id: string, checked: boolean) {
 /**
  * 批量分析：全部入队，由全局队列串行执行；通过 callbacks 统计完成后 Toast
  */
-function startBatchAnalyze() {
+async function startBatchAnalyze() {
   const ids = [...selectedIds.value]
   if (!ids.length) return
 
-  resetBatchStats()
-
-  ids.forEach((id) => {
-    const s = sessions.items.find((x) => x.id === id)
-    const title = s?.cardTitle || s?.projectName || id
-    const enqueued = queue.enqueue(id, title, {
-      onLowValue: () => {
-        batchSuccess.value++
-        batchFinished.value++
-        tryFinishBatchToast()
-      },
-      onSuccess: () => {
-        batchSuccess.value++
-        batchFinished.value++
-        tryFinishBatchToast()
-      },
-      onError: () => {
-        batchFail.value++
-        batchFinished.value++
-        tryFinishBatchToast()
-      },
-    })
-    if (enqueued) batchExpected.value++
-  })
-
-  batchMode.value = false
-  selectedIds.value = new Set()
+  try {
+    await queue.startAnalysis(ids)
+    showToast(`已创建批量分析任务，共 ${ids.length} 条`)
+    batchMode.value = false
+    selectedIds.value = new Set()
+  } catch (error) {
+    showToast(error instanceof Error ? error.message : String(error), 'error')
+  }
 }
 
 function openSearchHit(cardId: string, sessionId: string) {
@@ -214,7 +157,14 @@ function openSearchHit(cardId: string, sessionId: string) {
 </script>
 
 <template>
-  <div class="flex flex-col h-full px-5 pt-5 mx-auto w-full relative">
+  <div class="sessions-page">
+    <header class="page-intro">
+      <div>
+        <p>CONVERSATION ARCHIVE / 对话档案</p>
+        <h2>追踪每一次思考的轨迹</h2>
+      </div>
+      <span>本地归档 · 用户确认后分析</span>
+    </header>
     <SessionToolbar />
 
     <!-- Toast -->
@@ -276,13 +226,24 @@ function openSearchHit(cardId: string, sessionId: string) {
       <div
         v-for="c in search.results"
         :key="c.id"
+        role="link"
+        tabindex="0"
+        :aria-label="`打开知识：${c.title}`"
         class="rounded-lg border border-slate-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 p-3 cursor-pointer hover:border-emerald-300 dark:hover:border-emerald-800 transition-all group"
         @click="openSearchHit(c.id, c.sessionId)"
+        @keydown.enter.prevent="openSearchHit(c.id, c.sessionId)"
+        @keydown.space.prevent="openSearchHit(c.id, c.sessionId)"
       >
         <div class="flex items-center justify-between gap-3">
           <div class="min-w-0">
             <div class="text-sm font-medium text-slate-800 dark:text-slate-200 group-hover:text-emerald-600 dark:group-hover:text-emerald-400 truncate">{{ c.title }}</div>
-            <div class="text-xs text-slate-500 line-clamp-1 mt-0.5">{{ c.summary }}</div>
+            <div class="flex flex-wrap items-center gap-1.5 mt-1 text-[10px] text-slate-500">
+              <span v-if="c.type">{{ getCardTypeLabel(c.type) }}</span>
+              <span v-if="c.sourceName">· {{ c.sourceName }}</span>
+              <span v-for="tag in c.tags" :key="tag" class="rounded border px-1.5 py-0.5">{{ tag }}</span>
+              <span v-for="tech in c.technologies" :key="tech" class="rounded px-1.5 py-0.5" style="background: var(--pine-soft); color: var(--pine)">{{ tech }}</span>
+            </div>
+            <div class="text-xs text-slate-500 line-clamp-2 mt-1">{{ plainSnippet(c.matchSnippet) || c.summary }}</div>
           </div>
           <span class="i-lucide-arrow-right w-4 h-4 text-slate-400 group-hover:text-emerald-500 shrink-0" />
         </div>
@@ -298,7 +259,7 @@ function openSearchHit(cardId: string, sessionId: string) {
       <div v-else-if="!sessions.items.length" class="flex-1 flex items-center justify-center">
         <n-empty description="暂无会话，请先同步">
           <template #extra>
-            <n-button type="primary" @click="sessions.syncAll()">
+            <n-button type="primary" @click="queue.startSync()">
               <span class="inline-flex items-center gap-1.5">
                 <span class="i-lucide-refresh-cw w-3.5 h-3.5" />
                 立即同步
@@ -310,8 +271,8 @@ function openSearchHit(cardId: string, sessionId: string) {
 
       <template v-else>
         <!-- 列表标题行 -->
-        <div class="flex items-center justify-between mb-0">
-          <h2 class="text-base font-semibold text-slate-800 dark:text-slate-100">会话列表</h2>
+        <div class="list-heading">
+          <div><span>INDEX</span><strong>会话索引</strong></div>
           <n-button
             v-if="unanalyzedCount > 0 && !batchMode"
             size="small"
@@ -331,7 +292,7 @@ function openSearchHit(cardId: string, sessionId: string) {
         </p>
 
         <!-- 会话卡片列表 -->
-        <div class="flex-1 min-h-0 overflow-y-auto space-y-3 pb-32">
+        <div class="session-ledger">
           <SessionCard
             v-for="s in sessions.items"
             :key="s.id"
@@ -414,6 +375,16 @@ function openSearchHit(cardId: string, sessionId: string) {
 </template>
 
 <style scoped>
+.sessions-page { position:relative; display:flex; flex-direction:column; width:100%; max-width:1380px; height:100%; margin:0 auto; padding:30px 42px 0; }
+.page-intro { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; margin-bottom:24px; padding-bottom:20px; border-bottom:1px solid var(--line-strong); }
+.page-intro p { margin:0 0 9px; color:var(--muted); font-size:10px; letter-spacing:.16em; }
+.page-intro h2 { margin:0; max-width:600px; color:var(--ink); font-family:var(--font-editorial); font-size:27px; font-weight:500; letter-spacing:.02em; line-height:1.2; }
+.page-intro > span { padding-bottom:3px; color:var(--muted); font-size:11px; }
+.list-heading { display:flex; align-items:center; justify-content:space-between; min-height:48px; border-bottom:1px solid var(--line-strong); }
+.list-heading > div { display:flex; align-items:baseline; gap:11px; }
+.list-heading span { color:var(--vermilion); font-size:9px; letter-spacing:.14em; }
+.list-heading strong { font-family:var(--font-editorial); font-size:15px; font-weight:600; }
+.session-ledger { flex:1; min-height:0; overflow-y:auto; padding-bottom:108px; }
 .glass-bar {
   background: rgba(255, 255, 255, 0.85);
   backdrop-filter: blur(16px);
@@ -431,4 +402,5 @@ function openSearchHit(cardId: string, sessionId: string) {
     0 20px 25px -5px rgba(0, 0, 0, 0.3),
     0 10px 10px -5px rgba(0, 0, 0, 0.2);
 }
+@media (max-width:900px) { .sessions-page { padding:22px 22px 0; } .page-intro > span { display:none; } }
 </style>

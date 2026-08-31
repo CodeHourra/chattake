@@ -13,7 +13,6 @@ export const useSessionsStore = defineStore('sessions', () => {
   const page = ref(1)
   const pageSize = ref(20)
   const loading = ref(false)
-  const syncing = ref(false)
   const error = ref<string | null>(null)
 
   async function loadPage() {
@@ -37,22 +36,6 @@ export const useSessionsStore = defineStore('sessions', () => {
       console.error('[sessions] loadPage', e)
     } finally {
       loading.value = false
-    }
-  }
-
-  async function syncAll() {
-    syncing.value = true
-    error.value = null
-    try {
-      const r = await api.syncAll()
-      console.info('[sessions] sync', r)
-      await loadPage()
-      return r
-    } catch (e) {
-      error.value = e instanceof Error ? e.message : String(e)
-      throw e
-    } finally {
-      syncing.value = false
     }
   }
 
@@ -84,10 +67,8 @@ export const useSessionsStore = defineStore('sessions', () => {
     page,
     pageSize,
     loading,
-    syncing,
     error,
     loadPage,
-    syncAll,
     setPage,
     setPageSize,
     patchItem,

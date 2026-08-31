@@ -7,12 +7,12 @@
 import { invoke } from '@tauri-apps/api/core'
 import type {
   AppConfigDto,
+  ProviderProfileDto,
   Card,
   CardSummary,
-  CliProbeResult,
-  DistillSessionResult,
   ListCardsParams,
   Message,
+  Job,
   PaginatedResult,
   SearchCardsParams,
   Session,
@@ -20,14 +20,23 @@ import type {
   SessionListParams,
   SessionFilterPayload,
   SessionSummary,
-  SyncResult,
   TagCount,
+  TagRecord,
+  CardUpdatePayload,
+  CursorPage,
+  McpInfo,
   TypeCount,
 } from '../types'
 
 export const api = {
-  /** 全量采集 */
-  syncAll: () => invoke<SyncResult>('sync_all'),
+  startSync: (scope?: string | null) => invoke<Job>('start_sync', { scope: scope ?? null }),
+  startAnalysis: (sessionIds: string[], providerProfileId?: string | null) =>
+    invoke<Job>('start_analysis', { sessionIds, providerProfileId: providerProfileId ?? null }),
+  listJobs: (activeOnly = false) => invoke<Job[]>('list_jobs', { activeOnly }),
+  getJob: (jobId: string) => invoke<Job>('get_job', { jobId }),
+  cancelJob: (jobId: string) => invoke<Job>('cancel_job', { jobId }),
+  retryJobItem: (jobId: string, itemId: string, providerProfileId?: string | null) =>
+    invoke<Job>('retry_job_item', { jobId, itemId, providerProfileId: providerProfileId ?? null }),
 
   /** 分页查询会话列表 */
   listSessions: (params: SessionListParams) =>
@@ -72,12 +81,8 @@ export const api = {
   getSession: (id: string) => invoke<Session>('get_session', { id }),
 
   /** 获取会话所有消息（对话回放用） */
-  getSessionMessages: (sessionId: string) =>
-    invoke<Message[]>('get_session_messages', { sessionId }),
-
-  /** 提炼会话 → 价值判断 + 可选笔记生成 */
-  distillSession: (sessionId: string) =>
-    invoke<DistillSessionResult>('distill_session', { sessionId }),
+  getSessionMessages: (sessionId: string, cursor?: number | null) =>
+    invoke<CursorPage<Message>>('get_session_messages', { sessionId, cursor: cursor ?? null, limit: 100 }),
 
   /** FTS5 全文搜索卡片 */
   searchCards: (params: SearchCardsParams) =>
@@ -95,12 +100,20 @@ export const api = {
       cardType: params.cardType ?? null,
       value: params.value ?? null,
       techStack: params.techStack ?? null,
+      publicationStatus: params.publicationStatus ?? null,
       page: params.page ?? null,
       pageSize: params.pageSize ?? null,
     }),
 
   /** 获取单张卡片（含 tags） */
   getCard: (id: string) => invoke<Card>('get_card', { id }),
+  updateCard: (id: string, payload: CardUpdatePayload) =>
+    invoke<Card>('update_card', { id, ...payload }),
+  publishCard: (id: string, replaceExisting: boolean) =>
+    invoke<Card>('publish_card', { id, replaceExisting }),
+  listTagRecords: () => invoke<TagRecord[]>('list_tag_records'),
+  mergeTags: (kind: TagRecord['kind'], sources: string[], target: string) =>
+    invoke<void>('merge_tags', { kind, sources, target }),
 
   /** 获取会话分组统计（侧栏目录树） */
   getSessionGroups: () => invoke<SessionGroupCount[]>('get_session_groups'),
@@ -117,14 +130,22 @@ export const api = {
   /** 读取当前应用配置 */
   getConfig: () => invoke<AppConfigDto>('get_config'),
 
+  /** 本次启动若重建过旧库，返回可恢复备份路径。 */
+  getDatabaseBackupPath: () => invoke<string | null>('get_database_backup_path'),
+
   /** 保存应用配置（写磁盘 + 热更新内存） */
   saveConfig: (config: AppConfigDto) => invoke<void>('save_config', { config }),
 
-  /**
-   * 在登录 shell 环境下探测常见 AI CLI 的绝对路径（与终端 `command -v` 一致）。
-   * 用于设置页「自动检测」，避免用户手填路径。
-   */
-  probeCliTools: () => invoke<CliProbeResult[]>('probe_cli_tools'),
+  /** 临时加载供应商模型列表；结果不持久化。 */
+  listProviderModels: (profile: ProviderProfileDto) =>
+    invoke<string[]>('list_provider_models', { profile }),
+
+  /** 优先测试模型列表；不支持时发送最小 Chat Completions 请求。 */
+  testProvider: (profile: ProviderProfileDto) =>
+    invoke<string>('test_provider', { profile }),
+
+  /** 获取只读 MCP 的可用状态、路径与手动配置片段。 */
+  getMcpInfo: () => invoke<McpInfo>('get_mcp_info'),
 
   /** 单条笔记导出为 Markdown（路径由系统「另存为」决定） */
   exportCardMarkdown: (cardId: string, filePath: string) =>

@@ -1,0 +1,72 @@
+# 有得 v0.2.0 配置示例。实际文件：~/.chattake/config.toml
+
+[distiller]
+active_profile_id = "siliconflow-main"
+
+[[distiller.profiles]]
+id = "siliconflow-main"
+name = "硅基流动"
+kind = "api"
+provider = "siliconflow"
+base_url = "https://api.siliconflow.cn/v1"
+api_key = "sk-..."
+model = "deepseek-ai/DeepSeek-V3"
+timeout_secs = 120
+
+[[distiller.profiles]]
+id = "deepseek-backup"
+name = "DeepSeek"
+kind = "api"
+provider = "deepseek"
+base_url = "https://api.deepseek.com/v1"
+api_key = "sk-..."
+model = "deepseek-chat"
+timeout_secs = 120
+
+[[distiller.profiles]]
+id = "codex-local"
+name = "本地 Codex"
+kind = "cli"
+provider = "codex"
+command = "codex"
+model = ""
+timeout_secs = 120
+
+[sync]
+scan_on_startup = true
+
+[[collector.sources]]
+id = "claude-code"
+name = "Claude Code"
+enabled = true
+scan_dirs = ["~/.claude"]
+
+[[collector.sources]]
+id = "cursor"
+name = "Cursor"
+enabled = true
+scan_dirs = ["~/Library/Application Support/Cursor"]
+
+[[collector.sources]]
+id = "codex"
+name = "Codex"
+enabled = true
+scan_dirs = ["~/.codex/sessions", "~/.codex/archived_sessions"]
+
+[[collector.sources]]
+id = "codebuddy"
+name = "CodeBuddy"
+enabled = false
+scan_dirs = ["~/Library/Application Support/CodeBuddyExtension/Data", "~/.local/share/CodeBuddyExtension"]
+
+[[collector.sources]]
+id = "omp"
+name = "Oh My Pi"
+enabled = true
+scan_dirs = ["~/.omp/agent/sessions"]
+
+[[collector.sources]]
+id = "pi"
+name = "Pi"
+enabled = true
+scan_dirs = ["~/.pi/agent/sessions"]

@@ -1,34 +1,41 @@
 <script setup lang="ts">
 /**
- * 知识库 —— 笔记卡片列表 / 卡片网格双视图，内容区固定高度可滚动，分页贴底。
+ * 知识库 —— 档案索引的舒展 / 紧凑双密度视图，内容区固定高度可滚动，分页贴底。
  *
- * 视图模式持久化：localStorage key `xunji:knowledgeViewMode`
+ * 视图模式持久化：localStorage key `chattake:knowledgeViewMode`
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   NSpin,
-  NEmpty,
   NTag,
   NCheckbox,
   NButton,
+  NDropdown,
+  NInput,
+  NModal,
+  NSelect,
+  NTooltip,
   useMessage,
   useDialog,
 } from 'naive-ui'
-import { getCardTypeLabel } from '@xunji/shared'
+import type { DropdownOption } from 'naive-ui'
+import { getCardTypeLabel } from '@chattake/shared'
 import { api } from '../lib/tauri'
 import { exportAllCardsToDir, exportSelectedCards } from '../lib/cardExport'
-import type { CardSummary } from '../types'
+import type { CardSummary, TagRecord } from '../types'
 import { useFiltersStore } from '../stores/filters'
+import { useSidebarStore } from '../stores/sidebar'
 import Pagination from '../components/Pagination.vue'
 
-const VIEW_MODE_KEY = 'xunji:knowledgeViewMode'
+const VIEW_MODE_KEY = 'chattake:knowledgeViewMode'
 type ViewMode = 'list' | 'card'
 
 const router = useRouter()
 const message = useMessage()
 const dialog = useDialog()
 const filters = useFiltersStore()
+const sidebar = useSidebarStore()
 const items = ref<CardSummary[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -39,8 +46,18 @@ const selectedIds = ref(new Set<string>())
 const exportBusy = ref(false)
 
 const viewMode = ref<ViewMode>('card')
+const publicationStatus = ref<'published' | 'draft'>('published')
+const tagManagerOpen = ref(false)
+const tagRecords = ref<TagRecord[]>([])
+const tagKind = ref<'topic' | 'technology'>('topic')
+const tagSources = ref<string[]>([])
+const tagTarget = ref('')
 
 const selectedCount = computed(() => selectedIds.value.size)
+const exportOptions = computed<DropdownOption[]>(() => [
+  { key: 'selected', label: `导出所选${selectedCount.value ? `（${selectedCount.value}）` : ''}`, disabled: !selectedCount.value },
+  { key: 'all', label: '导出全部笔记' },
+])
 
 watch(viewMode, (v) => {
   localStorage.setItem(VIEW_MODE_KEY, v)
@@ -53,6 +70,7 @@ async function load() {
       cardType: filters.cardType || undefined,
       tags: filters.selectedTags.length ? [...filters.selectedTags] : undefined,
       techStack: filters.selectedTechStacks.length ? [...filters.selectedTechStacks] : undefined,
+      publicationStatus: publicationStatus.value,
       page: page.value,
       pageSize: pageSize.value,
     })
@@ -63,6 +81,28 @@ async function load() {
   }
 }
 
+async function openTagManager() {
+  tagRecords.value = await api.listTagRecords()
+  tagSources.value = []
+  tagTarget.value = ''
+  tagManagerOpen.value = true
+}
+
+const tagOptions = computed(() => tagRecords.value
+  .filter((tag) => tag.kind === tagKind.value)
+  .map((tag) => ({ label: tag.name, value: tag.name })))
+
+async function mergeSelectedTags() {
+  try {
+    await api.mergeTags(tagKind.value, tagSources.value, tagTarget.value)
+    await Promise.all([sidebar.loadLibraryMeta(), load()])
+    tagRecords.value = await api.listTagRecords()
+    tagSources.value = []
+    tagTarget.value = ''
+    message.success('标签已合并并重建检索索引')
+  } catch (error) { message.error(error instanceof Error ? error.message : String(error)) }
+}
+
 onMounted(() => {
   const raw = localStorage.getItem(VIEW_MODE_KEY)
   if (raw === 'list' || raw === 'card') viewMode.value = raw
@@ -71,6 +111,7 @@ onMounted(() => {
 
 watch(
   [
+    () => publicationStatus.value,
     () => filters.cardType,
     () => filters.selectedTags.length,
     () => filters.selectedTechStacks.length,
@@ -178,87 +219,74 @@ function onExportAll() {
     })
   })()
 }
+
+function onExportSelect(key: string | number) {
+  if (key === 'selected') void onExportSelected()
+  if (key === 'all') onExportAll()
+}
 </script>
 
 <template>
   <div class="flex flex-col h-full min-h-0 max-w-5xl mx-auto w-full px-5 pt-5">
     <!-- 顶栏：标题 + 工具栏 -->
-    <header class="shrink-0 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
-      <div>
-        <h1 class="text-base font-semibold text-slate-800 dark:text-slate-100 tracking-tight">
-          知识库
-        </h1>
-        <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-          共 {{ total }} 条记录 · 当前{{ viewMode === 'card' ? '卡片' : '列表' }}视图
-        </p>
-      </div>
-      <div class="flex flex-wrap items-center gap-2 justify-end">
-        <div class="flex flex-wrap gap-1.5 items-center">
-          <span v-if="selectedCount" class="text-[11px] text-slate-500 dark:text-slate-400">已选 {{ selectedCount }} 条</span>
-          <n-button size="small" secondary :disabled="!items.length" @click="selectAllOnPage">
-            全选当页
-          </n-button>
-          <n-button size="small" secondary :disabled="!selectedCount" @click="clearSelection">
-            清除选择
-          </n-button>
-          <n-button
-            size="small"
-            secondary
-            :loading="exportBusy"
-            :disabled="exportBusy || !selectedCount"
-            @click="onExportSelected"
-          >
-            <span class="inline-flex items-center gap-1">
-              <span class="i-lucide-folder-output w-3.5 h-3.5" />
-              导出所选
-            </span>
-          </n-button>
-          <n-button
-            type="primary"
-            size="small"
-            :loading="exportBusy"
-            :disabled="exportBusy"
-            @click="onExportAll"
-          >
-            <span class="inline-flex items-center gap-1">
-              <span class="i-lucide-archive w-3.5 h-3.5" />
-              导出全部笔记
-            </span>
-          </n-button>
+    <header class="library-header">
+      <div class="library-heading">
+        <p>KNOWLEDGE ARCHIVE</p>
+        <div class="library-title-row">
+          <h1>知识笔记</h1>
+          <span>{{ total }} 条</span>
         </div>
-        <!-- 视图切换：与顶栏/会话分段条一致，segment-pill-btn 避免 WebView 默认灰底 -->
-        <div class="bg-slate-100/80 dark:bg-neutral-900/55 p-1 rounded-lg inline-flex shrink-0">
+      </div>
+      <div class="library-actions">
+        <div class="publication-tabs" role="group" aria-label="发布状态">
           <button
+            v-for="option in [{ value: 'published', label: '已发布' }, { value: 'draft', label: '待审草稿' }] as const"
+            :key="option.value"
             type="button"
-            class="segment-pill-btn"
-            :class="[
-              'flex items-center gap-1.5 px-3 py-1 rounded-md text-sm font-medium transition-colors cursor-pointer border-0 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35',
-              viewMode === 'list'
-                ? 'bg-white dark:bg-neutral-800 text-slate-800 dark:text-slate-100 ring-1 ring-slate-200/90 dark:ring-white/10'
-                : 'bg-transparent text-slate-500 hover:text-slate-800 dark:text-neutral-500 dark:hover:text-neutral-200',
-            ]"
-            @click="viewMode = 'list'"
+            class="ui-tab publication-tab"
+            :class="{ active: publicationStatus === option.value }"
+            :aria-pressed="publicationStatus === option.value"
+            @click="publicationStatus = option.value"
           >
-            <span class="i-lucide-list w-3.5 h-3.5" />
-            列表
+            {{ option.label }}
           </button>
-          <button
-            type="button"
-            class="segment-pill-btn"
-            :class="[
-              'flex items-center gap-1.5 px-3 py-1 rounded-md text-sm font-medium transition-colors cursor-pointer border-0 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/35',
-              viewMode === 'card'
-                ? 'bg-white dark:bg-neutral-800 text-slate-800 dark:text-slate-100 ring-1 ring-slate-200/90 dark:ring-white/10'
-                : 'bg-transparent text-slate-500 hover:text-slate-800 dark:text-neutral-500 dark:hover:text-neutral-200',
-            ]"
-            @click="viewMode = 'card'"
-          >
-            <span class="i-lucide-layout-grid w-3.5 h-3.5" />
-            卡片
-          </button>
+        </div>
+        <span class="library-divider" aria-hidden="true" />
+        <n-button size="small" quaternary @click="openTagManager">
+          <template #icon><span class="i-lucide-tags w-4 h-4" /></template>
+          标签治理
+        </n-button>
+        <n-button v-if="items.length" size="small" quaternary @click="selectAllOnPage">
+          选择本页
+        </n-button>
+        <n-dropdown trigger="click" :options="exportOptions" @select="onExportSelect">
+          <n-button size="small" secondary :loading="exportBusy" :disabled="exportBusy">
+            <template #icon><span class="i-lucide-download w-4 h-4" /></template>
+            导出
+          </n-button>
+        </n-dropdown>
+        <div class="density-switch" role="group" aria-label="列表密度">
+          <n-tooltip trigger="hover"><template #trigger>
+            <button type="button" class="ui-icon-toggle" :class="{ active: viewMode === 'list' }" :aria-pressed="viewMode === 'list'" aria-label="紧凑视图" @click="viewMode = 'list'">
+              <span class="i-lucide-list w-4 h-4" aria-hidden="true" />
+            </button>
+          </template>紧凑视图</n-tooltip>
+          <n-tooltip trigger="hover"><template #trigger>
+            <button type="button" class="ui-icon-toggle" :class="{ active: viewMode === 'card' }" :aria-pressed="viewMode === 'card'" aria-label="舒展视图" @click="viewMode = 'card'">
+              <span class="i-lucide-rows-3 w-4 h-4" aria-hidden="true" />
+            </button>
+          </template>舒展视图</n-tooltip>
         </div>
       </div>
     </header>
+
+    <div v-if="selectedCount" class="selection-bar" aria-live="polite">
+      <span><strong>{{ selectedCount }}</strong> 条笔记已选择</span>
+      <div>
+        <n-button size="tiny" quaternary @click="clearSelection">取消选择</n-button>
+        <n-button size="tiny" secondary :loading="exportBusy" @click="onExportSelected">导出所选</n-button>
+      </div>
+    </div>
 
     <!-- 与侧栏筛选联动：在主区域可摘除条件，无需回到侧栏 -->
     <div
@@ -307,160 +335,52 @@ function onExportAll() {
         <n-spin size="medium" />
       </div>
 
-      <n-empty v-else-if="!items.length" description="暂无知识卡片" class="py-16" />
+      <div v-else-if="!items.length" class="knowledge-empty">
+        <span class="i-lucide-book-dashed knowledge-empty-icon" aria-hidden="true" />
+        <p>{{ publicationStatus === 'published' ? '还没有已发布的知识' : '没有等待审核的草稿' }}</p>
+        <span>{{ publicationStatus === 'published' ? '从有价值的对话中提炼第一条可复用笔记。' : '中价值分析结果和重新分析结果会先出现在这里。' }}</span>
+        <n-button v-if="publicationStatus === 'published'" size="small" secondary @click="router.push({ name: 'sessions' })">前往对话档案</n-button>
+        <n-button v-else size="small" quaternary @click="publicationStatus = 'published'">查看已发布</n-button>
+      </div>
 
-      <!-- 卡片视图；选中 ring-inset：根节点 overflow-hidden 会裁掉外向 ring，见 docs/踩坑/桌面应用-Tailwind-ring与overflow-hidden裁切.md -->
-      <div
-        v-else-if="viewMode === 'card'"
-        class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"
-      >
-        <div
+      <div v-else class="knowledge-index" :data-density="viewMode">
+        <article
           v-for="c in items"
           :key="c.id"
-          class="group relative rounded-2xl border bg-white dark:bg-neutral-900 transition-all duration-300 cursor-pointer overflow-hidden flex flex-col"
-          :class="[
-            selectedIds.has(c.id)
-              ? 'ring-2 ring-inset ring-emerald-500 border-transparent bg-emerald-50/30 dark:bg-emerald-950/30'
-              : 'border-slate-200/80 dark:border-neutral-700/60 hover:border-emerald-300 dark:hover:border-emerald-700',
-          ]"
-          @click="open(c)"
+          class="knowledge-row"
+          :class="{ selected: selectedIds.has(c.id) }"
         >
-          <!-- 卡片主体 -->
-          <div class="p-5 flex-1 flex flex-col gap-3">
-            <div class="flex items-start justify-between">
-              <div class="flex items-center gap-2 flex-wrap">
-                <n-tag v-if="c.type" size="small" :bordered="false" type="success" class="font-medium rounded">
-                  {{ getCardTypeLabel(c.type) }}
-                </n-tag>
-                <n-tag
-                  v-if="c.value"
-                  size="small"
-                  :bordered="false"
-                  :type="c.value === 'high' ? 'success' : c.value === 'medium' ? 'warning' : 'default'"
-                  class="rounded"
-                >
-                  {{ c.value === 'high' ? '高价值' : c.value === 'medium' ? '中价值' : c.value }}
-                </n-tag>
-              </div>
-              <div class="shrink-0" @click.stop>
-                <n-checkbox
-                  :checked="selectedIds.has(c.id)"
-                  size="small"
-                  @update:checked="(v: boolean) => toggleSelect(c.id, v)"
-                />
-              </div>
-            </div>
-
-            <div class="flex-1">
-              <h3 class="text-base font-semibold text-slate-800 dark:text-slate-100 leading-snug group-hover:text-emerald-700 dark:group-hover:text-emerald-400 transition-colors">
-                {{ c.title }}
-              </h3>
-              <p class="text-[13px] text-slate-500 dark:text-slate-400 line-clamp-3 mt-2 leading-relaxed">
-                {{ c.summary || '暂无摘要' }}
-              </p>
-            </div>
-          </div>
-
-          <!-- 卡片底部 -->
-          <div class="px-5 py-3.5 bg-slate-50/50 dark:bg-neutral-800/30 border-t border-slate-100 dark:border-neutral-800 flex flex-col gap-2.5">
-            <div class="flex items-center justify-between text-[12px]">
-              <span class="flex items-center gap-1.5 font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-neutral-800 px-2 py-0.5 rounded border border-slate-200 dark:border-neutral-700">
-                <span class="i-lucide-folder w-3.5 h-3.5 text-slate-400" />
-                {{ c.projectName || '—' }}
-              </span>
-              <span v-if="c.sourceName" class="flex items-center gap-1.5 text-slate-400 dark:text-slate-500 font-mono bg-white dark:bg-neutral-800 px-1.5 py-0.5 rounded border border-slate-200 dark:border-neutral-700">
-                <span class="i-lucide-terminal w-3 h-3" />
-                {{ c.sourceName }}
-              </span>
-            </div>
-            <div class="flex items-center justify-between text-[11px] text-slate-400 dark:text-slate-500 mt-1">
-              <span class="flex items-center gap-1.5">
-                <span class="i-lucide-clock w-3 h-3" />
-                {{ formatTime(c.updatedAt) }}
-              </span>
-              <span class="opacity-0 group-hover:opacity-100 transition-opacity font-medium text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                阅读笔记 <span class="i-lucide-arrow-right w-3 h-3" />
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 列表视图；选中态同卡片：ring-inset 避免 overflow-hidden 裁切 -->
-      <div v-else class="space-y-4">
-        <div
-          v-for="c in items"
-          :key="'list-'+c.id"
-          class="group relative rounded-xl border bg-white dark:bg-neutral-900 transition-all duration-300 cursor-pointer overflow-hidden flex items-center"
-          :class="[
-            selectedIds.has(c.id)
-              ? 'ring-2 ring-inset ring-emerald-500 border-transparent bg-emerald-50/30 dark:bg-emerald-950/30'
-              : 'border-slate-200/80 dark:border-neutral-700/60 hover:border-emerald-300 dark:hover:border-emerald-700',
-          ]"
-          @click="open(c)"
-        >
-          <!-- Checkbox -->
-          <div class="pl-4 shrink-0" @click.stop>
+          <button type="button" class="knowledge-hit" :aria-label="`阅读知识：${c.title}`" @click="open(c)" />
+          <span class="knowledge-rail" :data-value="c.value || 'none'" />
+          <div class="knowledge-select" @click.stop>
             <n-checkbox
               :checked="selectedIds.has(c.id)"
-              size="small"
-              @update:checked="(v: boolean) => toggleSelect(c.id, v)"
+              :aria-label="`选择 ${c.title}`"
+              @update:checked="(value: boolean) => toggleSelect(c.id, value)"
             />
           </div>
-
-          <!-- 列表项内容 -->
-          <div class="flex-1 p-4 flex items-center gap-4">
-            <div class="flex-1 min-w-0">
-              <div class="flex items-center gap-2 mb-1">
-                <n-tag v-if="c.type" size="small" :bordered="false" type="success" class="font-medium rounded !text-[11px]">
-                  {{ getCardTypeLabel(c.type) }}
-                </n-tag>
-                <n-tag
-                  v-if="c.value"
-                  size="small"
-                  :bordered="false"
-                  :type="c.value === 'high' ? 'success' : c.value === 'medium' ? 'warning' : 'default'"
-                  class="rounded !text-[11px]"
-                >
-                  {{ c.value === 'high' ? '高价值' : c.value === 'medium' ? '中价值' : c.value }}
-                </n-tag>
-                <h3 class="text-[15px] font-semibold text-slate-800 dark:text-slate-100 truncate group-hover:text-emerald-700 dark:group-hover:text-emerald-400 transition-colors">
-                  {{ c.title }}
-                </h3>
-              </div>
-              <p class="text-[13px] text-slate-500 dark:text-slate-400 truncate">
-                {{ c.summary || '暂无摘要' }}
-              </p>
+          <div class="knowledge-copy">
+            <div class="knowledge-eyebrow">
+              <span v-if="c.type">{{ getCardTypeLabel(c.type) }}</span>
+              <span v-if="c.value">{{ c.value === 'high' ? '高价值' : c.value === 'medium' ? '中价值' : c.value }}</span>
+              <span v-if="c.publicationStatus === 'draft'" class="draft-mark">草稿</span>
             </div>
-
-            <!-- 元数据 -->
-            <div class="flex items-center gap-4 shrink-0 text-[12px] text-slate-400 dark:text-slate-500">
-              <span class="flex items-center gap-1.5 w-24">
-                <span class="i-lucide-folder w-3.5 h-3.5" />
-                <span class="truncate">{{ c.projectName || '—' }}</span>
-              </span>
-              <span v-if="c.sourceName" class="flex items-center gap-1.5 w-24">
-                <span class="i-lucide-terminal w-3 h-3" />
-                <span class="truncate">{{ c.sourceName }}</span>
-              </span>
-              <span class="flex items-center gap-1.5 w-32">
-                <span class="i-lucide-clock w-3.5 h-3.5" />
-                {{ formatTime(c.updatedAt) }}
-              </span>
-            </div>
-
-            <!-- 操作按钮 -->
-            <div class="opacity-0 group-hover:opacity-100 transition-opacity duration-200 shrink-0 w-24 flex justify-end">
-              <n-button secondary size="small" class="rounded-lg">
-                <template #icon>
-                  <span class="i-lucide-book-open w-4 h-4" />
-                </template>
-                阅读笔记
-              </n-button>
+            <h3>{{ c.title }}</h3>
+            <p>{{ c.summary || '暂无摘要' }}</p>
+            <div v-if="c.tags.length || c.technologies.length" class="knowledge-tags">
+              <span v-for="tag in c.tags.slice(0, 3)" :key="tag"># {{ tag }}</span>
+              <span v-for="tech in c.technologies.slice(0, 3)" :key="tech" class="technology">{{ tech }}</span>
             </div>
           </div>
-        </div>
+          <div class="knowledge-meta">
+            <span>{{ c.projectName || '未关联项目' }}</span>
+            <span v-if="c.sourceName">{{ c.sourceName }}</span>
+            <time>{{ formatTime(c.updatedAt) }}</time>
+          </div>
+          <span class="i-lucide-arrow-up-right knowledge-arrow" aria-hidden="true" />
+        </article>
       </div>
+
     </div>
 
     <!-- 分页 -->
@@ -476,5 +396,66 @@ function onExportAll() {
         @update:page-size="setPageSize"
       />
     </footer>
+
+    <n-modal v-model:show="tagManagerOpen" preset="card" title="标签治理" class="max-w-lg">
+      <div class="space-y-3">
+        <n-select v-model:value="tagKind" :options="[{ label: '主题标签', value: 'topic' }, { label: '技术项', value: 'technology' }]" />
+        <n-select v-model:value="tagSources" multiple filterable :options="tagOptions" placeholder="选择要重命名或合并的标签" />
+        <n-input v-model:value="tagTarget" placeholder="目标名称；选择一个来源即可完成重命名" />
+        <div class="flex justify-end gap-2">
+          <n-button @click="tagManagerOpen = false">关闭</n-button>
+          <n-button type="primary" :disabled="!tagSources.length || !tagTarget.trim()" @click="mergeSelectedTags">合并</n-button>
+        </div>
+      </div>
+    </n-modal>
   </div>
 </template>
+
+<style scoped>
+.library-header { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; flex-shrink:0; margin-bottom:16px; }
+.library-heading p { margin:0 0 7px; color:var(--muted); font-size:9px; letter-spacing:.16em; }
+.library-title-row { display:flex; align-items:baseline; gap:10px; }
+.library-title-row h1 { margin:0; color:var(--ink); font-family:var(--font-editorial); font-size:24px; font-weight:500; letter-spacing:.02em; }
+.library-title-row span { color:var(--muted); font-size:11px; }
+.library-actions { display:flex; align-items:center; justify-content:flex-end; gap:5px; min-width:0; }
+.publication-tabs { display:flex; align-items:center; gap:16px; margin-right:5px; }
+.publication-tab { position:relative; height:32px; padding:0; background:transparent; color:var(--muted); font-size:12px; cursor:pointer; transition:color .18s var(--ease-out); }
+.publication-tab:hover,.publication-tab.active { color:var(--ink); }
+.publication-tab.active::after { content:''; position:absolute; right:0; bottom:0; left:0; height:1px; background:var(--vermilion); }
+.library-divider { width:1px; height:18px; margin:0 4px; background:var(--line); }
+.density-switch { display:flex; align-items:center; gap:2px; margin-left:4px; padding:2px; border:1px solid var(--line); border-radius:var(--control-radius); }
+.ui-icon-toggle { display:grid; width:28px; height:28px; place-items:center; border-radius:6px; background:transparent; color:var(--muted); cursor:pointer; transition:color .16s var(--ease-out), background-color .16s var(--ease-out); }
+.ui-icon-toggle:hover { color:var(--ink); }
+.ui-icon-toggle.active { background:var(--surface); color:var(--pine); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--line) 72%,transparent); }
+.selection-bar { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-shrink:0; margin-bottom:12px; padding:8px 10px 8px 12px; border:1px solid color-mix(in srgb,var(--pine) 28%,var(--line)); border-radius:var(--control-radius); background:color-mix(in srgb,var(--pine) 7%,transparent); color:var(--ink-soft); font-size:11px; }
+.selection-bar strong { color:var(--pine); }
+.selection-bar > div { display:flex; gap:4px; }
+.knowledge-index { border-top:1px solid var(--line); }
+.knowledge-row { position:relative; display:grid; grid-template-columns:minmax(0,1fr) 150px 22px; gap:22px; align-items:center; min-height:142px; padding:20px 18px 20px 48px; border-bottom:1px solid var(--line); transition:background-color .14s ease; }
+.knowledge-row:hover,.knowledge-row.selected { background:color-mix(in srgb,var(--surface) 72%,transparent); }
+.knowledge-hit { position:absolute; inset:0; z-index:0; appearance:none; border:0; background:transparent; cursor:pointer; }
+.knowledge-hit:focus-visible { outline:2px solid var(--pine); outline-offset:-2px; }
+.knowledge-rail { position:absolute; left:0; top:24px; bottom:24px; width:2px; background:var(--line-strong); pointer-events:none; }
+.knowledge-rail[data-value='high'] { background:var(--vermilion); }
+.knowledge-rail[data-value='medium'] { background:var(--pine); }
+.knowledge-select { position:absolute; left:16px; top:22px; z-index:2; }
+.knowledge-copy { position:relative; z-index:1; min-width:0; pointer-events:none; }
+.knowledge-eyebrow { display:flex; gap:16px; margin-bottom:7px; color:var(--muted); font-size:10px; letter-spacing:.09em; text-transform:uppercase; }
+.knowledge-eyebrow span + span::before { content:'·'; margin-right:16px; color:var(--line-strong); }
+.knowledge-eyebrow .draft-mark { color:var(--vermilion); }
+.knowledge-copy h3 { margin:0; color:var(--ink); font-family:var(--font-editorial); font-size:18px; font-weight:600; line-height:1.45; }
+.knowledge-copy p { display:-webkit-box; margin:6px 0 0; overflow:hidden; color:var(--muted); font-size:12px; line-height:1.65; -webkit-box-orient:vertical; -webkit-line-clamp:2; }
+.knowledge-tags { display:flex; flex-wrap:wrap; gap:11px; margin-top:9px; color:var(--pine); font-size:10px; }
+.knowledge-tags .technology { color:var(--ink-soft); }
+.knowledge-meta { position:relative; z-index:1; display:flex; flex-direction:column; gap:6px; min-width:0; color:var(--muted); font-size:11px; pointer-events:none; }
+.knowledge-meta span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.knowledge-arrow { position:relative; z-index:1; width:15px; height:15px; color:var(--muted); opacity:.35; pointer-events:none; }
+.knowledge-row:hover .knowledge-arrow { color:var(--pine); opacity:1; }
+.knowledge-index[data-density='list'] .knowledge-row { min-height:112px; padding-top:15px; padding-bottom:15px; }
+.knowledge-empty { display:flex; min-height:360px; flex-direction:column; align-items:flex-start; justify-content:center; max-width:430px; margin:0 auto; color:var(--muted); }
+.knowledge-empty-icon { width:30px; height:30px; margin-bottom:18px; color:var(--line-strong); }
+.knowledge-empty p { margin:0 0 7px; color:var(--ink); font-family:var(--font-editorial); font-size:20px; }
+.knowledge-empty > span:not(.knowledge-empty-icon) { margin-bottom:18px; font-size:12px; line-height:1.7; }
+@media (max-width:1100px) { .library-header { align-items:flex-start; flex-direction:column; gap:12px; } .library-actions { justify-content:flex-start; flex-wrap:wrap; } }
+@media (max-width:1000px) { .knowledge-row { grid-template-columns:minmax(0,1fr) 22px; } .knowledge-meta { display:none; } }
+</style>

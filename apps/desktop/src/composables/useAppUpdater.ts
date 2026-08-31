@@ -65,7 +65,7 @@ export function useAppUpdater() {
       const msg = e instanceof Error ? e.message : String(e)
       errorText.value =
         msg.includes('Tauri') || msg.includes('not allowed')
-          ? '请在寻迹桌面客户端内使用（浏览器预览不支持检查更新）。'
+          ? '请在有得桌面客户端内使用（浏览器预览不支持检查更新）。'
           : `检查更新失败：${msg}`
       phase.value = 'error'
       console.error('[updater] check failed', e)

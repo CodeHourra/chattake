@@ -9,9 +9,10 @@
 //! scheduler.rs       采集调度器 + 去重写入 + 同步日志
 //! ```
 
-pub mod normalizer;
+pub mod agent_jsonl;
 pub mod claude_code;
 pub mod codebuddy;
+pub mod codex;
 pub mod cursor;
+pub mod normalizer;
 pub mod scheduler;
-

@@ -1,322 +1,192 @@
-use rusqlite::params;
 use rusqlite::Connection;
 
 use super::db::DbResult;
 
-/// 数据库 Schema 迁移入口。
-///
-/// 通过 PRAGMA user_version 追踪当前版本号，
-/// 按版本递增依次执行对应的迁移函数。
-///
-///   user_version=0 → 执行 migrate_v1 → user_version=1
-///   user_version=1 → 执行 migrate_v2 → user_version=2 (未来)
-///
+pub const SCHEMA_VERSION: u32 = 7;
+
 pub fn run(conn: &Connection) -> DbResult<()> {
     let version: u32 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
-    log::debug!("当前数据库版本: v{}", version);
-
-    if version < 1 {
-        migrate_v1(conn)?;
+    if version == SCHEMA_VERSION {
+        return Ok(());
     }
-    if version < 2 {
-        migrate_v2(conn)?;
+    if version > SCHEMA_VERSION {
+        return Err(super::db::DbError::Invalid(format!(
+            "数据库版本 v{version} 高于当前应用支持的 v{SCHEMA_VERSION}"
+        )));
     }
-    if version < 3 {
-        migrate_v3(conn)?;
+    if version > 0 {
+        log::warn!("将已备份的 v{} 数据库重建为 v{}", version, SCHEMA_VERSION);
     }
-    if version < 4 {
-        migrate_v4(conn)?;
-    }
-    if version < 5 {
-        migrate_v5(conn)?;
-    }
-    if version < 6 {
-        migrate_v6(conn)?;
-    }
-
-    Ok(())
+    rebuild_v7(conn)
 }
 
-fn migrate_v1(conn: &Connection) -> DbResult<()> {
-    log::info!("执行数据库迁移 v1...");
-
+fn rebuild_v7(conn: &Connection) -> DbResult<()> {
     conn.execute_batch(
-        "
-        CREATE TABLE IF NOT EXISTS sources (
-            id          TEXT PRIMARY KEY,
-            name        TEXT NOT NULL,
-            enabled     INTEGER DEFAULT 1,
-            scan_paths  TEXT,
-            last_sync   TEXT,
-            config      TEXT
+        r#"
+        PRAGMA foreign_keys=OFF;
+        DROP TABLE IF EXISTS cards_fts;
+        DROP TABLE IF EXISTS card_tags;
+        DROP TABLE IF EXISTS tags;
+        DROP TABLE IF EXISTS analysis_runs;
+        DROP TABLE IF EXISTS job_items;
+        DROP TABLE IF EXISTS jobs;
+        DROP TABLE IF EXISTS token_usage;
+        DROP TABLE IF EXISTS sync_log;
+        DROP TABLE IF EXISTS categories;
+        DROP TABLE IF EXISTS cards;
+        DROP TABLE IF EXISTS messages;
+        DROP TABLE IF EXISTS sessions;
+        DROP TABLE IF EXISTS sources;
+
+        CREATE TABLE sessions (
+            id                  TEXT PRIMARY KEY,
+            source_id           TEXT NOT NULL,
+            external_session_id TEXT NOT NULL,
+            source_host         TEXT NOT NULL DEFAULT 'local',
+            project_path        TEXT,
+            project_name        TEXT,
+            message_count       INTEGER NOT NULL DEFAULT 0,
+            content_hash        TEXT,
+            raw_path            TEXT,
+            raw_mtime_ms        INTEGER,
+            raw_size_bytes      INTEGER,
+            created_at          TEXT NOT NULL,
+            updated_at          TEXT NOT NULL,
+            status              TEXT NOT NULL DEFAULT 'pending',
+            value               TEXT,
+            has_updates         INTEGER NOT NULL DEFAULT 0,
+            analyzed_at         TEXT,
+            error_message       TEXT,
+            analysis_title      TEXT,
+            analysis_type       TEXT,
+            analysis_note       TEXT,
+            UNIQUE(source_id, external_session_id, source_host)
         );
 
-        CREATE TABLE IF NOT EXISTS sessions (
-            id              TEXT PRIMARY KEY,
-            source_id       TEXT NOT NULL,
-            session_id      TEXT NOT NULL,
-            source_host     TEXT DEFAULT 'local',
-            project_path    TEXT,
-            project_name    TEXT,
-            message_count   INTEGER DEFAULT 0,
-            content_hash    TEXT,
-            raw_path        TEXT,
-            created_at      TEXT NOT NULL,
-            updated_at      TEXT NOT NULL,
-            status          TEXT DEFAULT 'pending',
-            value           TEXT,
-            has_updates     INTEGER DEFAULT 0,
-            analyzed_at     TEXT,
-            error_message   TEXT,
-            UNIQUE(session_id, source_host)
-        );
-
-        CREATE TABLE IF NOT EXISTS messages (
+        CREATE TABLE messages (
             id          TEXT PRIMARY KEY,
-            session_id  TEXT NOT NULL,
+            session_id  TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
             role        TEXT NOT NULL,
             content     TEXT NOT NULL,
             timestamp   TEXT,
-            tokens_in   INTEGER DEFAULT 0,
-            tokens_out  INTEGER DEFAULT 0,
+            tokens_in   INTEGER NOT NULL DEFAULT 0,
+            tokens_out  INTEGER NOT NULL DEFAULT 0,
             seq_order   INTEGER NOT NULL,
-            FOREIGN KEY (session_id) REFERENCES sessions(id)
+            UNIQUE(session_id, seq_order)
         );
 
-        CREATE TABLE IF NOT EXISTS cards (
-            id                TEXT PRIMARY KEY,
-            session_id        TEXT NOT NULL,
-            title             TEXT NOT NULL,
-            type              TEXT,
-            value             TEXT,
-            summary           TEXT,
-            note              TEXT NOT NULL,
-            category_id       TEXT,
-            memory            TEXT,
-            skill             TEXT,
-            source_name       TEXT,
-            project_name      TEXT,
-            prompt_tokens     INTEGER DEFAULT 0,
-            completion_tokens INTEGER DEFAULT 0,
-            cost_yuan         REAL DEFAULT 0,
-            feedback          TEXT,
-            created_at        TEXT NOT NULL,
-            updated_at        TEXT NOT NULL,
-            FOREIGN KEY (session_id) REFERENCES sessions(id)
+        CREATE TABLE jobs (
+            id                  TEXT PRIMARY KEY,
+            kind                TEXT NOT NULL,
+            status              TEXT NOT NULL CHECK(status IN ('queued','running','succeeded','failed','cancelled','interrupted')),
+            phase               TEXT NOT NULL,
+            done                INTEGER NOT NULL DEFAULT 0,
+            total               INTEGER NOT NULL DEFAULT 0,
+            cancel_requested    INTEGER NOT NULL DEFAULT 0,
+            error               TEXT,
+            provider_profile_id TEXT,
+            provider            TEXT,
+            base_url            TEXT,
+            model               TEXT,
+            created_at          TEXT NOT NULL,
+            started_at          TEXT,
+            finished_at         TEXT
         );
 
-        CREATE TABLE IF NOT EXISTS tags (
-            id      TEXT PRIMARY KEY,
-            name    TEXT NOT NULL UNIQUE,
-            type    TEXT DEFAULT 'auto',
-            count   INTEGER DEFAULT 0
-        );
-
-        CREATE TABLE IF NOT EXISTS card_tags (
-            card_id TEXT NOT NULL,
-            tag_id  TEXT NOT NULL,
-            PRIMARY KEY (card_id, tag_id),
-            FOREIGN KEY (card_id) REFERENCES cards(id),
-            FOREIGN KEY (tag_id)  REFERENCES tags(id)
-        );
-
-        CREATE TABLE IF NOT EXISTS categories (
+        CREATE TABLE job_items (
             id          TEXT PRIMARY KEY,
-            name        TEXT NOT NULL,
-            parent_id   TEXT,
-            sort_order  INTEGER DEFAULT 0,
-            FOREIGN KEY (parent_id) REFERENCES categories(id)
+            job_id      TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+            session_id  TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+            source_id   TEXT,
+            raw_path    TEXT,
+            status      TEXT NOT NULL CHECK(status IN ('queued','running','succeeded','failed','cancelled','interrupted')),
+            phase       TEXT NOT NULL,
+            duration_ms INTEGER,
+            error       TEXT,
+            created_at  TEXT NOT NULL,
+            started_at  TEXT,
+            finished_at TEXT
         );
 
-        CREATE TABLE IF NOT EXISTS sync_log (
-            id               TEXT PRIMARY KEY,
-            source_id        TEXT NOT NULL,
-            started_at       TEXT NOT NULL,
-            finished_at      TEXT,
-            sessions_found   INTEGER DEFAULT 0,
-            sessions_new     INTEGER DEFAULT 0,
-            sessions_updated INTEGER DEFAULT 0,
-            status           TEXT DEFAULT 'running'
+        CREATE TABLE analysis_runs (
+            id                    TEXT PRIMARY KEY,
+            job_id                TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+            session_id            TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            provider_profile_id   TEXT NOT NULL,
+            provider              TEXT NOT NULL,
+            base_url_host         TEXT NOT NULL,
+            model                 TEXT NOT NULL,
+            content_hash          TEXT NOT NULL,
+            prompt_version        TEXT NOT NULL,
+            value                 TEXT,
+            reason                TEXT,
+            prompt_tokens_judge   INTEGER NOT NULL DEFAULT 0,
+            completion_tokens_judge INTEGER NOT NULL DEFAULT 0,
+            prompt_tokens_extract INTEGER NOT NULL DEFAULT 0,
+            completion_tokens_extract INTEGER NOT NULL DEFAULT 0,
+            duration_ms           INTEGER,
+            error_kind            TEXT,
+            error                 TEXT,
+            created_at            TEXT NOT NULL,
+            finished_at           TEXT
         );
 
-        CREATE TABLE IF NOT EXISTS token_usage (
-            id                TEXT PRIMARY KEY,
-            card_id           TEXT,
-            provider          TEXT NOT NULL,
-            model             TEXT NOT NULL,
-            prompt_tokens     INTEGER NOT NULL,
-            completion_tokens INTEGER NOT NULL,
-            cost_yuan         REAL NOT NULL,
-            created_at        TEXT NOT NULL,
-            FOREIGN KEY (card_id) REFERENCES cards(id)
+        CREATE TABLE cards (
+            id                  TEXT PRIMARY KEY,
+            session_id          TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            analysis_run_id     TEXT REFERENCES analysis_runs(id) ON DELETE SET NULL,
+            title               TEXT NOT NULL,
+            type                TEXT NOT NULL CHECK(type IN ('decision','troubleshooting','implementation','explanation','snippet')),
+            value               TEXT NOT NULL CHECK(value IN ('high','medium')),
+            summary             TEXT NOT NULL,
+            note                TEXT NOT NULL,
+            publication_status  TEXT NOT NULL CHECK(publication_status IN ('draft','published')),
+            is_user_edited      INTEGER NOT NULL DEFAULT 0,
+            source_name         TEXT,
+            project_name        TEXT,
+            prompt_tokens       INTEGER NOT NULL DEFAULT 0,
+            completion_tokens   INTEGER NOT NULL DEFAULT 0,
+            cost_yuan           REAL NOT NULL DEFAULT 0,
+            feedback            TEXT,
+            created_at          TEXT NOT NULL,
+            updated_at          TEXT NOT NULL
         );
 
-        -- FTS5 全文搜索索引（独立表，手动管理写入/删除）
-        -- 注意：不使用 content='cards'，因为 cards 表没有 tags 列
-        CREATE VIRTUAL TABLE IF NOT EXISTS cards_fts USING fts5(
-            title, summary, note, tags,
-            tokenize='unicode61'
+        CREATE TABLE tags (
+            id              TEXT PRIMARY KEY,
+            name            TEXT NOT NULL,
+            normalized_name TEXT NOT NULL,
+            kind            TEXT NOT NULL CHECK(kind IN ('topic','technology')),
+            UNIQUE(kind, normalized_name)
         );
 
-        -- Indexes
-        CREATE INDEX IF NOT EXISTS idx_sessions_source   ON sessions(source_id);
-        CREATE INDEX IF NOT EXISTS idx_sessions_project  ON sessions(project_name);
-        CREATE INDEX IF NOT EXISTS idx_sessions_status   ON sessions(status);
-        CREATE INDEX IF NOT EXISTS idx_sessions_created  ON sessions(created_at);
-        CREATE INDEX IF NOT EXISTS idx_cards_session     ON cards(session_id);
-        CREATE INDEX IF NOT EXISTS idx_cards_type        ON cards(type);
-        CREATE INDEX IF NOT EXISTS idx_cards_value       ON cards(value);
-        CREATE INDEX IF NOT EXISTS idx_cards_created     ON cards(created_at);
-        CREATE INDEX IF NOT EXISTS idx_card_tags_tag     ON card_tags(tag_id);
-        CREATE INDEX IF NOT EXISTS idx_categories_parent ON categories(parent_id);
+        CREATE TABLE card_tags (
+            card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+            tag_id  TEXT NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+            PRIMARY KEY(card_id, tag_id)
+        );
 
-        PRAGMA user_version = 1;
-        ",
-    )?;
-
-    log::info!("数据库迁移 v1 完成");
-    Ok(())
-}
-
-/// v2 迁移：修复 cards_fts FTS5 表。
-///
-/// v1 的 `cards_fts` 使用了 `content='cards'`，导致 SQLite 在读取时
-/// 反查 cards 表并报 "no such column: T.tags"（cards 表没有 tags 列）。
-///
-/// 修复方案：
-/// 1. 删除旧的 content-backed FTS5 表
-/// 2. 重建为独立 FTS5 表（不绑定 content 表）
-/// 3. 从现有卡片 + card_tags 重建索引
-fn migrate_v2(conn: &Connection) -> DbResult<()> {
-    log::info!("执行数据库迁移 v2：修复 cards_fts 表...");
-
-    conn.execute_batch(
-        "
-        -- 删除旧的 content-backed FTS5 表（及其影子表）
-        DROP TABLE IF EXISTS cards_fts;
-
-        -- 重建为独立 FTS5 表，不使用 content='cards'
         CREATE VIRTUAL TABLE cards_fts USING fts5(
-            title, summary, note, tags,
-            tokenize='unicode61'
+            title, summary, note, tags, technologies,
+            tokenize='trigram'
         );
 
-        -- 从现有卡片数据重建全文索引
-        -- tags 字段通过 card_tags + tags 关联表拼接为逗号分隔字符串
-        INSERT INTO cards_fts(rowid, title, summary, note, tags)
-        SELECT
-            c.rowid,
-            c.title,
-            COALESCE(c.summary, ''),
-            c.note,
-            COALESCE(
-                (SELECT GROUP_CONCAT(t.name, ',')
-                 FROM card_tags ct
-                 JOIN tags t ON ct.tag_id = t.id
-                 WHERE ct.card_id = c.id),
-                ''
-            )
-        FROM cards c;
+        CREATE INDEX idx_sessions_source_updated ON sessions(source_id, updated_at DESC);
+        CREATE INDEX idx_sessions_project ON sessions(project_name);
+        CREATE INDEX idx_sessions_status_updated ON sessions(status, updated_at DESC);
+        CREATE INDEX idx_messages_session_order ON messages(session_id, seq_order);
+        CREATE INDEX idx_cards_session_status ON cards(session_id, publication_status, created_at DESC);
+        CREATE INDEX idx_cards_type_status ON cards(type, publication_status);
+        CREATE INDEX idx_cards_value_status ON cards(value, publication_status);
+        CREATE INDEX idx_card_tags_tag ON card_tags(tag_id, card_id);
+        CREATE INDEX idx_jobs_status_created ON jobs(status, created_at DESC);
+        CREATE INDEX idx_job_items_job_status ON job_items(job_id, status);
+        CREATE INDEX idx_analysis_runs_session_created ON analysis_runs(session_id, created_at DESC);
 
-        PRAGMA user_version = 2;
-        ",
+        PRAGMA user_version=7;
+        PRAGMA foreign_keys=ON;
+        "#,
     )?;
-
-    log::info!("数据库迁移 v2 完成");
-    Ok(())
-}
-
-/// v3 迁移：为 sessions 表新增 `analysis_note` 列。
-///
-/// 用于持久化低/无价值会话的判断原因，使页面刷新后仍可在会话列表展示摘要，
-/// 而不依赖前端内存中的临时 patchItem。
-fn migrate_v3(conn: &Connection) -> DbResult<()> {
-    log::info!("执行数据库迁移 v3：为 sessions 表新增 analysis_note 列...");
-
-    conn.execute_batch(
-        "
-        ALTER TABLE sessions ADD COLUMN analysis_note TEXT;
-        PRAGMA user_version = 3;
-        ",
-    )?;
-
-    log::info!("数据库迁移 v3 完成");
-    Ok(())
-}
-
-/// v5 迁移：为 cards 表新增 `tech_stack` 列。
-///
-/// LLM 在 distill_full 时会返回涉及的技术栈列表（如 ["Rust", "SQLite", "Tauri"]），
-/// 此前该字段被丢弃（#[allow(dead_code)]），v5 开始持久化为逗号分隔字符串。
-fn migrate_v5(conn: &Connection) -> DbResult<()> {
-    log::info!("执行数据库迁移 v5：为 cards 表新增 tech_stack 列...");
-
-    conn.execute_batch(
-        "
-        ALTER TABLE cards ADD COLUMN tech_stack TEXT;
-        PRAGMA user_version = 5;
-        ",
-    )?;
-
-    log::info!("数据库迁移 v5 完成");
-    Ok(())
-}
-
-/// v6 迁移：将 sessions 中仍含百分号编码的 `project_path` / `project_name` 解码为 UTF-8 展示。
-///
-/// 与采集端 [`crate::path_local::decode_cursor_folder_to_local_path`] 对齐，修复升级前已入库的数据，
-/// 避免侧栏树与列表继续显示 `%E5%90%91...`。
-fn migrate_v6(conn: &Connection) -> DbResult<()> {
-    log::info!("执行数据库迁移 v6：解码 sessions 中百分号编码的项目路径...");
-
-    let mut stmt = conn.prepare(
-        "SELECT id, project_path, project_name FROM sessions
-         WHERE (project_path IS NOT NULL AND instr(project_path, '%') > 0)
-            OR (project_name IS NOT NULL AND instr(project_name, '%') > 0)",
-    )?;
-
-    let rows: Vec<(String, Option<String>, Option<String>)> = stmt
-        .query_map([], |row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let mut upd = conn.prepare(
-        "UPDATE sessions SET project_path = ?1, project_name = ?2 WHERE id = ?3",
-    )?;
-
-    let mut fixed = 0usize;
-    for (id, pp, pn) in rows {
-        let (new_pp, new_pn) = crate::path_local::decode_session_paths(pp.clone(), pn.clone());
-        if new_pp != pp || new_pn != pn {
-            upd.execute(params![new_pp, new_pn, id])?;
-            fixed += 1;
-        }
-    }
-
-    if fixed > 0 {
-        log::info!("数据库迁移 v6：已修正 {} 条会话的项目路径/名称", fixed);
-    }
-
-    conn.execute_batch("PRAGMA user_version = 6;")?;
-    log::info!("数据库迁移 v6 完成");
-    Ok(())
-}
-///
-/// 低/无价值会话无 Card 产出，但 judge_value 仍返回对话类型（type）和原因（reason）。
-/// 这两列持久化该信息，使列表在刷新后仍能展示类型徽章和由原因构造的标题，
-/// 而无需依赖前端内存中的临时 patchItem。
-fn migrate_v4(conn: &Connection) -> DbResult<()> {
-    log::info!("执行数据库迁移 v4：为 sessions 表新增 analysis_title / analysis_type 列...");
-
-    conn.execute_batch(
-        "
-        ALTER TABLE sessions ADD COLUMN analysis_title TEXT;
-        ALTER TABLE sessions ADD COLUMN analysis_type  TEXT;
-        PRAGMA user_version = 4;
-        ",
-    )?;
-
-    log::info!("数据库迁移 v4 完成");
+    log::info!("数据库 v7 Schema 已创建");
     Ok(())
 }
