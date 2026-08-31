@@ -2,6 +2,12 @@
 
 > 面向使用者的更新说明。实现细节见 `docs/CHANGELOG.md`。
 
+## 0.2.2（2026-08-31）
+
+### 修复
+
+- 修复应用内下载更新时出现 `Cannot read private member from an object whose class did not declare it`、导致无法安装新版本的问题。
+
 ## 0.2.1（2026-08-31）
 
 ### 体验改进
