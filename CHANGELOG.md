@@ -25,6 +25,10 @@
 - 删除所有 `*-internal` 路径和旧分类/Memory/Skill 数据模型。
 - 旧数据库会在可恢复备份成功后重建，备份位于 `~/.chattake/db/backups/`。
 
+### 修复
+
+- 修复会话列表按项目筛选时，多表联查可能触发 SQLite `ambiguous column name: project_name` 的问题。
+
 ## 0.1.7（2026-03-26）
 
 ### 开发体验
